@@ -25,7 +25,7 @@ function isImageAvatar(avatar: string): boolean {
 export default function SettingsModal({ character, onSave, onClose }: SettingsModalProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [selectedPreset, setSelectedPreset] = useState<CharacterId | 'custom'>(
+  const [selectedPreset, setSelectedPreset] = useState<string | 'custom'>(
     character.isCustom ? 'custom' : character.id
   );
   const [customName, setCustomName] = useState(
@@ -48,7 +48,7 @@ export default function SettingsModal({ character, onSave, onClose }: SettingsMo
   );
   const [previewAvatar, setPreviewAvatar] = useState(character.displayAvatar);
 
-  const handlePresetSelect = (id: CharacterId | 'custom') => {
+  const handlePresetSelect = (id: string | 'custom') => {
     setSelectedPreset(id);
     if (id !== 'custom') {
       const char = CHARACTERS.find((c) => c.id === id)!;
