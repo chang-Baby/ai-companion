@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef } from 'react';
-import { CHARACTERS, CharacterId } from '@/app/data/characters';
+import { CHARACTERS } from '@/app/data/characters';
 import type { ChatSettings, DisplayCharacter } from '../ChatClient';
 
 interface SettingsModalProps {
