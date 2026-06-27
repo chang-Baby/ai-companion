@@ -87,15 +87,15 @@ onOpenSettings,
         </button>
         <div className="chat-header-avatar">
           {avatarIsImage ? (
-            <img src={character.displayAvatar} alt={character.displayName} />
+            <img src={character.displayAvatar} alt={character.name} />
           ) : (
             character.displayAvatar
           )}
         </div>
         <div className="chat-header-info">
-          <div className="chat-header-name">{character.displayName}</div>
+          <div className="chat-header-name">{character.name}</div>
           <div className="chat-header-title">
-            {character.isCustom ? '自定义角色' : character.title}
+            {!character.isPreset ? '自定义角色' : character.title}
           </div>
         </div>
         {memoryStats && (
@@ -116,17 +116,17 @@ onOpenSettings,
           <div className="chat-welcome">
             <div className="chat-welcome-avatar">
               {avatarIsImage ? (
-                <img src={character.displayAvatar} alt={character.displayName} />
+                <img src={character.displayAvatar} alt={character.name} />
               ) : (
                 character.displayAvatar
               )}
             </div>
-            <h2 className="chat-welcome-name">你好，我是{character.displayName}</h2>
+            <h2 className="chat-welcome-name">你好，我是{character.name}</h2>
             <p className="chat-welcome-title">
-              {character.isCustom ? '自定义角色' : character.title}
+              {!character.isPreset ? '自定义角色' : character.title}
             </p>
-            <p className="chat-welcome-desc">{character.displayDescription}</p>
-            <p className="chat-welcome-hint">开始和{character.displayName}对话吧~</p>
+            <p className="chat-welcome-desc">{character.description}</p>
+            <p className="chat-welcome-hint">开始和{character.name}对话吧~</p>
           </div>
         ) : (
           messages.map((msg, i) => (
@@ -137,7 +137,7 @@ onOpenSettings,
           <div className="message-row message-row-assistant">
             <div className="message-avatar">
               {avatarIsImage ? (
-                <img src={character.displayAvatar} alt={character.displayName} />
+                <img src={character.displayAvatar} alt={character.name} />
               ) : (
                 character.displayAvatar
               )}
@@ -161,7 +161,7 @@ onOpenSettings,
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={`和${character.displayName}说点什么吧...`}
+          placeholder={`和${character.name}说点什么吧...`}
           rows={1}
           disabled={isLoading}
         />

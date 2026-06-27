@@ -1,66 +1,32 @@
 'use client';
 
 import { useState, useRef } from 'react';
-import { CHARACTERS } from '../../data/characters';
-import type { ChatSettings, DisplayCharacter } from '../../data/types';
+import type { DisplayCharacter, CustomCharacter } from '../../data/types';
 
 interface SettingsModalProps {
-  character: DisplayCharacter;
-  onSave: (settings: ChatSettings) => void;
+  mode: 'edit' | 'create';
+  character?: DisplayCharacter;  // edit mode only
+  onSave: ((data: { avatar: string }) => void) | ((data: CustomCharacter) => void);
   onClose: () => void;
+  onDelete?: () => void;
 }
 
-const PRESET_STYLES = [
-  { value: 'gentle', label: '温柔倾听' },
-  { value: 'tsundere', label: '傲娇猫系' },
-  { value: 'humorous', label: '幽默伙伴' },
-  { value: 'coach', label: '考研陪练' },
-  { value: 'custom', label: '自定义' },
-];
-
-function isImageAvatar(avatar: string): boolean {
-  return avatar.startsWith('data:') || avatar.startsWith('http');
+function isImageUrl(s: string): boolean {
+  return s.startsWith('data:') || s.startsWith('http');
 }
 
-export default function SettingsModal({ character, onSave, onClose }: SettingsModalProps) {
+export default function SettingsModal({ mode, character, onSave, onClose, onDelete }: SettingsModalProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const isCreate = mode === 'create';
 
-  const [selectedPreset, setSelectedPreset] = useState<string | 'custom'>(
-    character.isCustom ? 'custom' : character.id
-  );
-  const [customName, setCustomName] = useState(
-    character.isCustom ? character.displayName : ''
-  );
-  const [selectedStyle, setSelectedStyle] = useState(
-    character.isCustom ? character.style : character.style
-  );
-  const [customStyleDesc, setCustomStyleDesc] = useState(
-    character.isCustom ? character.displayStyleDesc : ''
-  );
-  const [customDesc, setCustomDesc] = useState(
-    character.isCustom ? character.customDesc : ''
-  );
-  const [avatarUrl, setAvatarUrl] = useState(
-    isImageAvatar(character.displayAvatar) ? character.displayAvatar : ''
-  );
-  const [uploadedAvatar, setUploadedAvatar] = useState(
-    character.displayAvatar.startsWith('data:') ? character.displayAvatar : ''
-  );
-  const [previewAvatar, setPreviewAvatar] = useState(character.displayAvatar);
-
-  const handlePresetSelect = (id: string | 'custom') => {
-    setSelectedPreset(id);
-    if (id !== 'custom') {
-      const char = CHARACTERS.find((c) => c.id === id)!;
-      setCustomName(char.name);
-      setSelectedStyle(char.style);
-      setCustomStyleDesc(char.styleDesc);
-      setCustomDesc(char.description);
-      setAvatarUrl('');
-      setUploadedAvatar('');
-      setPreviewAvatar(char.emoji);
-    }
-  };
+  // 编辑模式：初始值来自现有角色
+  const [name, setName] = useState(isCreate ? '' : character?.name || '');
+  const [styleDesc, setStyleDesc] = useState(isCreate ? '' : character?.styleDesc || '');
+  const [description, setDescription] = useState(isCreate ? '' : character?.description || '');
+  const [avatarUrl, setAvatarUrl] = useState(isCreate ? '' : (character?.displayAvatar && isImageUrl(character.displayAvatar) ? character.displayAvatar : ''));
+  const [uploadedAvatar, setUploadedAvatar] = useState('');
+  const [previewAvatar, setPreviewAvatar] = useState(isCreate ? '🤖' : character?.displayAvatar || '🤖');
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
 
   const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -77,60 +43,46 @@ export default function SettingsModal({ character, onSave, onClose }: SettingsMo
 
   const handleAvatarUrlChange = (url: string) => {
     setAvatarUrl(url);
-    if (url) {
-      setPreviewAvatar(url);
-      setUploadedAvatar('');
-    } else if (!uploadedAvatar) {
-      if (selectedPreset !== 'custom') {
-        setPreviewAvatar(CHARACTERS.find((c) => c.id === selectedPreset)?.emoji || '🤖');
-      } else {
-        setPreviewAvatar('🤖');
-      }
-    }
+    if (url) { setPreviewAvatar(url); setUploadedAvatar(''); }
+    else if (!uploadedAvatar) { setPreviewAvatar(character?.emoji || '🤖'); }
   };
 
-  const getFinalAvatar = (): string => {
-    if (uploadedAvatar) return uploadedAvatar;
-    if (avatarUrl) return avatarUrl;
-    if (selectedPreset !== 'custom') {
-      return CHARACTERS.find((c) => c.id === selectedPreset)?.emoji || '🤖';
-    }
-    return '🤖';
-  };
-
-  const getFinalName = (): string => {
-    if (selectedPreset !== 'custom') {
-      return CHARACTERS.find((c) => c.id === selectedPreset)?.name || '';
-    }
-    return customName;
-  };
+  const getFinalAvatar = () => uploadedAvatar || avatarUrl || '';
 
   const handleSave = () => {
-    const settings: ChatSettings = {
-      isCustom: selectedPreset === 'custom',
-      customName: getFinalName(),
-      customDesc,
-      customStyleDesc: selectedStyle === 'custom' ? customStyleDesc : '',
-      avatar: getFinalAvatar(),
-      style: selectedStyle,
-    };
-    onSave(settings);
+    if (isCreate) {
+      if (!name.trim()) return;
+      const customChar: CustomCharacter = {
+        id: '',
+        name: name.trim(),
+        emoji: '🤖',
+        title: '自定义角色',
+        description: description.trim() || `由你创造的 AI 伙伴`,
+        personality: styleDesc.trim() || description.trim() || '善解人意',
+        styleDesc: styleDesc.trim() || '按你设定的方式交流',
+        systemPrompt: buildCustomPrompt(name.trim(), description.trim(), styleDesc.trim()),
+        features: [],
+        avatar: getFinalAvatar() || undefined,
+        createdAt: new Date().toISOString(),
+      };
+      (onSave as (data: CustomCharacter) => void)(customChar);
+    } else {
+      (onSave as (data: { avatar: string }) => void)({ avatar: getFinalAvatar() });
+    }
   };
 
-  const avatarIsImage = isImageAvatar(previewAvatar);
+  const avatarIsImage = isImageUrl(previewAvatar);
 
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-        {/* 头部 */}
         <div className="modal-header">
-          <h2 className="modal-title">角色设定</h2>
+          <h2 className="modal-title">{isCreate ? '创建新角色' : '角色设定'}</h2>
           <button className="modal-close-btn" onClick={onClose}>✕</button>
         </div>
 
-        {/* 主体 */}
         <div className="modal-body">
-          {/* 头像预览 */}
+          {/* 头像 */}
           <div className="modal-avatar-section">
             <div className="modal-avatar-wrapper">
               {avatarIsImage ? (
@@ -141,121 +93,104 @@ export default function SettingsModal({ character, onSave, onClose }: SettingsMo
             </div>
           </div>
 
-          {/* 预设角色 */}
-          <div className="modal-setting-group">
-            <label className="modal-label">选择预设角色</label>
-            <div className="modal-preset-grid">
-              {CHARACTERS.map((char) => (
-                <button
-                  key={char.id}
-                  className={`modal-preset-btn ${selectedPreset === char.id ? 'modal-preset-active' : ''}`}
-                  onClick={() => handlePresetSelect(char.id)}
-                >
-                  <span>{char.emoji}</span>
-                  <span>{char.name}</span>
-                </button>
-              ))}
-              <button
-                className={`modal-preset-btn ${selectedPreset === 'custom' ? 'modal-preset-active' : ''}`}
-                onClick={() => handlePresetSelect('custom')}
-              >
-                <span>✨</span>
-                <span>自定义</span>
-              </button>
-            </div>
-          </div>
-
-          {/* 自定义设定 */}
-          {selectedPreset === 'custom' && (
-            <div className="modal-custom-section">
+          {/* 创建模式：完整表单 */}
+          {isCreate && (
+            <>
               <div className="modal-setting-group">
-                <label className="modal-label">角色名字</label>
-                <input
-                  type="text"
-                  className="modal-input"
-                  value={customName}
-                  onChange={(e) => setCustomName(e.target.value)}
-                  placeholder="给你的 AI 伙伴起个名字..."
-                />
-              </div>
-
-              <div className="modal-row">
-                <div className="modal-setting-group" style={{ flex: 1 }}>
-                  <label className="modal-label">说话风格</label>
-                  <select
-                    className="modal-select"
-                    value={selectedStyle}
-                    onChange={(e) => setSelectedStyle(e.target.value)}
-                  >
-                    {PRESET_STYLES.map((s) => (
-                      <option key={s.value} value={s.value}>{s.label}</option>
-                    ))}
-                  </select>
-                </div>
-                {selectedStyle === 'custom' && (
-                  <div className="modal-setting-group" style={{ flex: 1 }}>
-                    <label className="modal-label">风格描述</label>
-                    <input
-                      type="text"
-                      className="modal-input"
-                      value={customStyleDesc}
-                      onChange={(e) => setCustomStyleDesc(e.target.value)}
-                      placeholder="描述你想要的风格..."
-                    />
-                  </div>
-                )}
+                <label className="modal-label">角色名字 *</label>
+                <input type="text" className="modal-input" value={name}
+                  onChange={(e) => setName(e.target.value)} placeholder="给你的 AI 伙伴起个名字..." />
               </div>
 
               <div className="modal-setting-group">
-                <label className="modal-label">角色描述</label>
-                <textarea
-                  className="modal-textarea"
-                  value={customDesc}
-                  onChange={(e) => setCustomDesc(e.target.value)}
-                  placeholder="描述角色的性格、背景、说话方式..."
-                  rows={3}
-                />
+                <label className="modal-label">说话风格 & 性格描述</label>
+                <textarea className="modal-textarea" value={styleDesc}
+                  onChange={(e) => setStyleDesc(e.target.value)}
+                  placeholder={"自由描述你想要的风格和性格，比如：\n\"温柔体贴的大姐姐，喜欢用颜文字，会记住我说过的每件小事，偶尔撒娇但关键时刻很靠谱\"\n\nAI 会按照这个描述来塑造角色行为"}
+                  rows={4} />
               </div>
-            </div>
+
+              <div className="modal-setting-group">
+                <label className="modal-label">角色简介</label>
+                <textarea className="modal-textarea" value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="一句话介绍这个角色的背景和定位..."
+                  rows={2} />
+              </div>
+            </>
           )}
 
-          {/* 头像设定 */}
+          {/* 编辑模式：显示当前信息（只读）+ 可改头像 */}
+          {!isCreate && character && (
+            <>
+              <div className="modal-info-row">
+                <span className="modal-label">名字</span>
+                <span className="modal-info-value">{character.name}</span>
+              </div>
+              <div className="modal-info-row">
+                <span className="modal-label">风格</span>
+                <span className="modal-info-value">{character.styleDesc}</span>
+              </div>
+              <div className="modal-info-row">
+                <span className="modal-label">类型</span>
+                <span className="modal-info-value">{character.isPreset ? '预设角色' : '自定义角色'}</span>
+              </div>
+            </>
+          )}
+
+          {/* 头像设定（两种模式都有） */}
           <div className="modal-setting-group">
             <label className="modal-label">自定义头像</label>
             <div className="modal-avatar-row">
-              <input
-                type="text"
-                className="modal-input"
-                value={avatarUrl}
+              <input type="text" className="modal-input" value={avatarUrl}
                 onChange={(e) => handleAvatarUrlChange(e.target.value)}
-                placeholder="输入头像图片链接..."
-                disabled={!!uploadedAvatar}
-                style={{ flex: 1 }}
-              />
-              <span className="modal-or">或</span>
-              <button
-                className="modal-upload-btn"
-                onClick={() => fileInputRef.current?.click()}
-              >
-                📁 上传
-              </button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                className="modal-file-input"
-                onChange={handleAvatarUpload}
-              />
+                placeholder="输入头像图片链接..." disabled={!!uploadedAvatar} style={{ flex: 1 }} />
+              <span className="modal-or" style={{ flexShrink: 0, color: '#475569', fontSize: 12 }}>或</span>
+              <button className="modal-upload-btn" onClick={() => fileInputRef.current?.click()}>📁 上传</button>
+              <input ref={fileInputRef} type="file" accept="image/*" className="modal-file-input" onChange={handleAvatarUpload} />
             </div>
           </div>
         </div>
 
-        {/* 底部按钮 */}
         <div className="modal-footer">
-          <button className="modal-cancel-btn" onClick={onClose}>取消</button>
-          <button className="modal-save-btn" onClick={handleSave}>保存设定</button>
+          <div style={{ display: 'flex', gap: 10, flex: 1 }}>
+            {onDelete && (
+              deleteConfirm ? (
+                <>
+                  <span style={{ color: '#f87171', fontSize: 13, alignSelf: 'center' }}>确认删除？</span>
+                  <button className="modal-delete-confirm-btn" onClick={onDelete}>确认删除</button>
+                  <button className="modal-cancel-btn" onClick={() => setDeleteConfirm(false)}>取消</button>
+                </>
+              ) : (
+                <button className="modal-delete-btn" onClick={() => setDeleteConfirm(true)}>🗑️ 删除角色</button>
+              )
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button className="modal-cancel-btn" onClick={onClose}>取消</button>
+            <button className="modal-save-btn" onClick={handleSave}>
+              {isCreate ? '创建角色' : '保存'}
+            </button>
+          </div>
         </div>
       </div>
     </div>
   );
+}
+
+function buildCustomPrompt(name: string, description: string, styleDesc: string): string {
+  return `你是${name}，${description || '一个由用户创造的 AI 伙伴'}
+
+【你的性格和说话风格】
+${styleDesc || '善解人意、友好温暖'}
+
+【关于你面前的这个人】
+{memory}
+
+【回复规则】
+- 用中文回复
+- 严格遵守上面设定的性格和风格
+- 像真正的朋友一样自然交流
+- 记住用户告诉你的信息
+- 让对话有温度、有个性`;
 }

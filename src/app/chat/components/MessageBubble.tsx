@@ -24,7 +24,7 @@ export default function MessageBubble({ message, character }: MessageBubbleProps
       {!isUser && (
         <div className="message-avatar">
           {avatarIsImage ? (
-            <img src={character.displayAvatar} alt={character.displayName} />
+            <img src={character.displayAvatar} alt={character.name} />
           ) : (
             character.displayAvatar
           )}

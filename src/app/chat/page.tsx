@@ -1,19 +1,10 @@
 import { Suspense } from 'react';
 import type { CharacterId, ChatSettings } from '../data/types';
-import { isKnownCharacter, CHARACTERS } from '../data/characters';
+import { isPresetCharacter, PRESET_CHARACTERS } from '../data/characters';
 import ChatClient from './ChatClient';
 
 interface ChatPageProps {
-  searchParams: Promise<{
-    character?: string;
-    name?: string;
-    avatar?: string;
-    style?: string;
-    isCustom?: string;
-    customName?: string;
-    customDesc?: string;
-    customStyleDesc?: string;
-  }>;
+  searchParams: Promise<{ character?: string; avatar?: string }>;
 }
 
 function ChatLoadingFallback() {
@@ -21,9 +12,7 @@ function ChatLoadingFallback() {
     <div className="chat-layout">
       <div className="sidebar skeleton-sidebar">
         <div className="skeleton-header" />
-        {[1, 2, 3, 4].map((i) => (
-          <div key={i} className="skeleton-card" />
-        ))}
+        {[1, 2, 3, 4].map((i) => (<div key={i} className="skeleton-card" />))}
       </div>
       <div className="chat-main">
         <div className="skeleton-chat-header" />
@@ -36,20 +25,17 @@ function ChatLoadingFallback() {
 
 export default async function ChatPage({ searchParams }: ChatPageProps) {
   const params = await searchParams;
-  const characterParam = params.character;
-  const id: CharacterId =
-    characterParam && isKnownCharacter(characterParam)
-      ? characterParam
-      : CHARACTERS[0].id;
+  const char = params.character;
+  const avatar = params.avatar;
 
-  const settings: ChatSettings = {
-    isCustom: params.isCustom === 'true',
-    customName: params.customName || '',
-    customDesc: params.customDesc || '',
-    customStyleDesc: params.customStyleDesc || '',
-    avatar: params.avatar || '',
-    style: params.style || '',
-  };
+  let id: CharacterId;
+  if (char && (isPresetCharacter(char) || char.startsWith('custom_'))) {
+    id = char;
+  } else {
+    id = PRESET_CHARACTERS[0].id;
+  }
+
+  const settings: ChatSettings = { avatar: avatar || '' };
 
   return (
     <Suspense fallback={<ChatLoadingFallback />}>

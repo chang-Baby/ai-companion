@@ -457,6 +457,59 @@ body {
   border-color: rgba(56, 189, 248, 0.5);
 }
 
+/* 编辑模式信息行 */
+.modal-info-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(56, 189, 248, 0.04);
+}
+
+.modal-info-row .modal-label {
+  flex-shrink: 0;
+  width: 40px;
+}
+
+.modal-info-value {
+  color: #cbd5e1;
+  font-size: 13px;
+}
+
+/* 删除按钮 */
+.modal-delete-btn {
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(248, 113, 113, 0.2);
+  background: transparent;
+  color: #f87171;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.modal-delete-btn:hover {
+  background: rgba(248, 113, 113, 0.08);
+  border-color: rgba(248, 113, 113, 0.4);
+}
+
+.modal-delete-confirm-btn {
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: none;
+  background: #dc2626;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.modal-delete-confirm-btn:hover {
+  background: #b91c1c;
+}
+
 /* 特性展示 */
 .homepage-features {
   display: flex;
@@ -642,6 +695,31 @@ body {
 
 .sidebar-back-link:hover {
   color: #7dd3fc;
+}
+
+.sidebar-divider {
+  height: 1px;
+  background: rgba(56, 189, 248, 0.1);
+  margin: 8px 12px;
+}
+
+.sidebar-add-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  margin-top: 4px;
+  border-radius: 10px;
+  border: 1px dashed rgba(56, 189, 248, 0.25);
+  color: #7dd3fc;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.sidebar-add-btn:hover {
+  background: rgba(56, 189, 248, 0.08);
+  border-color: rgba(56, 189, 248, 0.4);
 }
 
 .sidebar-overlay {

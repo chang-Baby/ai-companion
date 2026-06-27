@@ -1,5 +1,5 @@
 import type { CharacterId, Memory, Message } from '../../data/types';
-import { getCharacter, isKnownCharacter } from '../../data/characters';
+import { getPresetCharacter, isPresetCharacter } from '../../data/characters';
 
 // 将 Memory 对象格式化为结构化的记忆文本块
 function buildMemorySection(memory: Memory, characterId: CharacterId): string {
@@ -109,16 +109,12 @@ export async function POST(request: Request) {
     }
 
     // 提取角色信息
-    const characterId: CharacterId =
-      settings?.characterId && isKnownCharacter(settings.characterId)
-        ? settings.characterId
-        : 'xingchen';
-
-    const character = getCharacter(characterId);
-    const name = settings?.name || character.name;
-    const personality = settings?.personality || character.personality;
-    const styleDesc = settings?.styleDesc || character.styleDesc;
-    const style = character.style;
+    const characterId: string = settings?.characterId || 'xingchen';
+    const name = settings?.name || 'AI 伙伴';
+    const personality = settings?.personality || '友善温暖';
+    const styleDesc = settings?.styleDesc || '自然随和';
+    const description = settings?.description || '';
+    const style = settings?.style || 'gentle';
     const memory: Memory = settings?.memory || {
       conversationSummary: '',
       keyFacts: [],
@@ -133,12 +129,30 @@ export async function POST(request: Request) {
     const memoryText = buildMemorySection(memory, characterId);
 
     // 构建系统 Prompt
-    const systemPrompt = character.systemPrompt
-      .replace('{name}', name)
-      .replace('{description}', character.description)
-      .replace('{personality}', personality)
-      .replace('{styleDesc}', styleDesc)
-      .replace('{memory}', memoryText);
+    let systemPrompt: string;
+    if (isPresetCharacter(characterId)) {
+      const character = getPresetCharacter(characterId);
+      systemPrompt = character.systemPrompt
+        .replace('{name}', name)
+        .replace('{description}', character.description)
+        .replace('{personality}', personality)
+        .replace('{styleDesc}', styleDesc)
+        .replace('{memory}', memoryText);
+    } else {
+      // 自定义角色：使用通用 Prompt
+      systemPrompt = `你是${name}，${description || '一个独特的 AI 伙伴'}
+
+【你的性格和说话风格】
+${styleDesc || personality}
+
+【关于你面前的这个人】
+${memoryText}
+
+【回复规则】
+- 用中文回复，严格按照上面设定的性格和风格
+- 像真正的朋友一样自然交流
+- 让对话有温度、有个性`;
+    }
 
     // 获取 API Key
     const apiKey = process.env.DEEPSEEK_API_KEY;

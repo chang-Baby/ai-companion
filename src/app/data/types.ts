@@ -1,37 +1,40 @@
-// 角色标识符
-export type CharacterId = 'xingchen' | 'moli' | 'yunxi' | 'weiyang';
+// 预设角色标识符
+export type PresetCharacterId = 'xingchen' | 'moli' | 'yunxi' | 'weiyang';
+
+// 角色 ID：预设或自定义（custom_ 前缀）
+export type CharacterId = PresetCharacterId | string;
 
 // 单条聊天消息
 export interface Message {
   role: 'user' | 'assistant';
   content: string;
-  timestamp: string; // ISO 8601
+  timestamp: string;
 }
 
 // 每日打卡记录
 export interface DailyCheckIn {
-  date: string;         // "2026-06-27"
-  duration: number;     // 当日对话分钟数（估算）
-  messageCount: number; // 当日消息条数
-  topics: string[];     // ["数学复习", "心态调整"]
-  mood: string;         // "motivated" | "tired" | "anxious" | "neutral" | "happy" | "frustrated"
+  date: string;
+  duration: number;
+  messageCount: number;
+  topics: string[];
+  mood: string;
 }
 
-// 长期记忆（每个角色独立存储）
+// 长期记忆
 export interface Memory {
-  conversationSummary: string;    // 最近对话的 1-2 句话摘要
-  keyFacts: string[];             // 用户关键信息 ["计算机专业大三", "目标院校清华"]
-  dailyCheckIns: DailyCheckIn[];  // 滚动 90 天打卡记录
-  totalChatTime: number;          // 累计对话分钟数（估算）
-  recentMood: string;             // 最近一次情绪状态
-  userGoals: string[];            // ["考研上岸", "每天学习6小时"]
-  weakSubjects?: string[];        // 薄弱科目（未央专用）
-  studyHours?: number;            // 已记录学习总时长（未央专用）
-  examDate?: string;              // 考试日期（未央专用）
-  lastUpdated: string;            // ISO 时间戳
+  conversationSummary: string;
+  keyFacts: string[];
+  dailyCheckIns: DailyCheckIn[];
+  totalChatTime: number;
+  recentMood: string;
+  userGoals: string[];
+  weakSubjects?: string[];
+  studyHours?: number;
+  examDate?: string;
+  lastUpdated: string;
 }
 
-// 角色配置
+// 基础角色配置
 export interface CharacterConfig {
   id: CharacterId;
   name: string;
@@ -39,13 +42,28 @@ export interface CharacterConfig {
   title: string;
   description: string;
   personality: string;
-  style: string;       // 回复风格代码（用于 fallback）
-  styleDesc: string;   // 回复风格中文描述
-  systemPrompt: string; // 系统 Prompt 模板，含 {name} {description} {memory} 占位符
+  styleDesc: string;
+  systemPrompt: string;
   features: string[];
+  isPreset: boolean; // true = 预设角色，false = 自定义角色
 }
 
-// API 请求/响应类型
+// 自定义角色存储
+export interface CustomCharacter {
+  id: string;          // "custom_1700000000000"
+  name: string;
+  emoji: string;
+  title: string;
+  description: string;
+  personality: string;
+  styleDesc: string;   // 自由书写的风格描述
+  systemPrompt: string;
+  features: string[];
+  avatar?: string;     // URL 或 base64
+  createdAt: string;
+}
+
+// API 类型
 export interface ChatRequest {
   messages: Message[];
   settings: {
@@ -71,22 +89,22 @@ export interface MemoryResponse {
   memory: Memory;
 }
 
-// 自定义角色设定（从 URL 或弹窗传入）
-export interface ChatSettings {
-  isCustom: boolean;
-  customName: string;
-  customDesc: string;
-  customStyleDesc: string;
-  avatar: string;
-  style: string;
+// 显示用角色（预设或自定义的统一视图）
+export interface DisplayCharacter {
+  id: CharacterId;
+  name: string;
+  emoji: string;
+  title: string;
+  description: string;
+  personality: string;
+  styleDesc: string;
+  systemPrompt: string;
+  features: string[];
+  isPreset: boolean;
+  displayAvatar: string;  // emoji, URL, 或 base64
 }
 
-// 扩展角色信息，包含自定义覆盖
-export interface DisplayCharacter extends CharacterConfig {
-  displayName: string;
-  displayAvatar: string;
-  displayDescription: string;
-  displayStyleDesc: string;
-  isCustom: boolean;
-  customDesc: string;
+// 设定弹窗数据
+export interface ChatSettings {
+  avatar: string;
 }
