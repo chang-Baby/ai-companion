@@ -70,3 +70,23 @@ export interface MemoryRequest {
 export interface MemoryResponse {
   memory: Memory;
 }
+
+// 自定义角色设定（从 URL 或弹窗传入）
+export interface ChatSettings {
+  isCustom: boolean;
+  customName: string;
+  customDesc: string;
+  customStyleDesc: string;
+  avatar: string;
+  style: string;
+}
+
+// 扩展角色信息，包含自定义覆盖
+export interface DisplayCharacter extends CharacterConfig {
+  displayName: string;
+  displayAvatar: string;
+  displayDescription: string;
+  displayStyleDesc: string;
+  isCustom: boolean;
+  customDesc: string;
+}

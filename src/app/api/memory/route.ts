@@ -1,5 +1,5 @@
-import type { Memory, Message } from '@/app/data/types';
-import { createDefaultMemory } from '@/app/data/memory-defaults';
+import type { Memory, Message } from '../../data/types';
+import { createDefaultMemory } from '../../data/memory-defaults';
 
 // 记忆分析 Prompt
 const MEMORY_ANALYSIS_PROMPT = `你是一个记忆分析助手。请分析以下对话，提取关键信息并以 JSON 格式返回。

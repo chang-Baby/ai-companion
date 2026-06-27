@@ -1,7 +1,6 @@
 'use client';
 
-import { Message } from '@/app/data/types';
-import type { DisplayCharacter } from '../ChatClient';
+import type { Message, DisplayCharacter } from '../../data/types';
 
 interface MessageBubbleProps {
   message: Message;

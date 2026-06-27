@@ -1,37 +1,20 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import {
-  CharacterConfig,
+import type {
   CharacterId,
+  ChatSettings,
+  DisplayCharacter,
   Message,
   Memory,
-} from '@/app/data/types';
-import { CHARACTERS, getCharacter } from '@/app/data/characters';
-import { createDefaultMemory } from '@/app/data/memory-defaults';
+} from '../data/types';
+import { CHARACTERS, getCharacter } from '../data/characters';
+import { createDefaultMemory } from '../data/memory-defaults';
 import Sidebar from './components/Sidebar';
 import ChatWindow from './components/ChatWindow';
 import SettingsModal from './components/SettingsModal';
 
-// 自定义角色设定（从 URL 传入）
-export interface ChatSettings {
-  isCustom: boolean;
-  customName: string;
-  customDesc: string;
-  customStyleDesc: string;
-  avatar: string;    // URL 或 base64
-  style: string;
-}
-
-// 扩展角色信息，包含自定义覆盖
-export interface DisplayCharacter extends CharacterConfig {
-  displayName: string;
-  displayAvatar: string;  // emoji, URL, 或 base64
-  displayDescription: string;
-  displayStyleDesc: string;
-  isCustom: boolean;
-  customDesc: string;
-}
+export type { ChatSettings, DisplayCharacter } from '../data/types';
 
 interface ChatClientProps {
   initialCharacterId: CharacterId;

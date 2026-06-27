@@ -1,7 +1,6 @@
 'use client';
 
-import { CharacterConfig, CharacterId } from '@/app/data/types';
-import type { DisplayCharacter } from '../ChatClient';
+import type { CharacterConfig, CharacterId, DisplayCharacter } from '../../data/types';
 
 interface SidebarProps {
   characters: CharacterConfig[];

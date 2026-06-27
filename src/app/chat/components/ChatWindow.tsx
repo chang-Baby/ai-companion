@@ -1,8 +1,7 @@
 'use client';
 
 import { useRef, useEffect, useState } from 'react';
-import { Message, Memory } from '@/app/data/types';
-import type { DisplayCharacter } from '../ChatClient';
+import type { Message, Memory, DisplayCharacter } from '../../data/types';
 import MessageBubble from './MessageBubble';
 
 interface ChatWindowProps {

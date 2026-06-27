@@ -1,6 +1,6 @@
 import { Suspense } from 'react';
-import { isKnownCharacter, CHARACTERS, CharacterId } from '../data/characters';
-import type { ChatSettings } from './ChatClient';
+import type { CharacterId, ChatSettings } from '../data/types';
+import { isKnownCharacter, CHARACTERS } from '../data/characters';
 import ChatClient from './ChatClient';
 
 interface ChatPageProps {

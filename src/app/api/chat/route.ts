@@ -1,5 +1,5 @@
-import type { CharacterId, Memory, Message } from '@/app/data/types';
-import { getCharacter, isKnownCharacter } from '@/app/data/characters';
+import type { CharacterId, Memory, Message } from '../../data/types';
+import { getCharacter, isKnownCharacter } from '../../data/characters';
 
 // 将 Memory 对象格式化为结构化的记忆文本块
 function buildMemorySection(memory: Memory, characterId: CharacterId): string {
