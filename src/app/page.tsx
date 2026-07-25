@@ -85,7 +85,7 @@ export default function HomePage() {
         {/* 开始按钮 */}
         <button
           className="homepage-start-btn"
-          onClick={() => router.push('/chat?character=xingchen')}
+          onClick={() => router.push('/login')}
         >
           开始对话 →
         </button>

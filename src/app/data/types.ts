@@ -1,5 +1,5 @@
 // 预设角色标识符
-export type PresetCharacterId = 'xingchen' | 'moli' | 'yunxi' | 'weiyang';
+export type PresetCharacterId = 'ji_linyuan' | 'lu_yanzhou' | 'yu_wen' | 'xie_huai';
 
 // 角色 ID：预设或自定义（custom_ 前缀）
 export type CharacterId = PresetCharacterId | string;

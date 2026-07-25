@@ -1,5 +1,12 @@
 import type { CharacterId, Memory, Message } from '../../data/types';
 import { getPresetCharacter, isPresetCharacter } from '../../data/characters';
+import { parseToken, fullSafetyCheck, getDailyStats } from '../../../lib/safety';
+
+/* ============================================================
+   Chat API — AI 对话接口（受三层防护）
+   ============================================================ */
+
+/* ---------- 记忆文本构建 ---------- */
 
 // 将 Memory 对象格式化为结构化的记忆文本块
 function buildMemorySection(memory: Memory, characterId: CharacterId): string {
@@ -102,11 +109,42 @@ function generateFallbackReply(style: string, userName: string): string {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { messages, settings } = body;
+    const { messages, settings, token } = body;
 
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
       return Response.json({ error: '消息不能为空' }, { status: 400 });
     }
+
+    /* ============================================================
+   三层防护检查（鉴权 → 频率 → 按角色配额 → 熔断）
+   任何一层不通过都会在此处拦截，不会到达 DeepSeek API
+   ============================================================ */
+    const { sessionId, valid } = parseToken(token || '');
+    if (!valid) {
+      return Response.json({ error: '请先登录', redirect: '/login' }, { status: 401 });
+    }
+
+    // 过滤掉转账卡片等系统消息，AI 只看到正常文本
+  const filteredMessages = messages.map(m => ({
+    ...m,
+    content: m.content.replace(/^TRANSFER_CARD:/, ''),
+  })).filter(m => m.content !== '');
+  const lastMsg = (filteredMessages[filteredMessages.length - 1]?.content || '');
+    const charId = settings?.characterId || 'xingchen';
+    const safety = fullSafetyCheck(sessionId, charId, lastMsg.length);
+    if (!safety.pass) {
+      return Response.json(
+        { error: safety.error, remaining: safety.remaining, retryAfter: safety.retryAfter, needUpgrade: safety.needUpgrade },
+        { status: safety.status || 403 }
+      );
+    }
+
+    // 附加配额和成本信息到响应头
+    const stats = getDailyStats();
+    const headers: Record<string, string> = {
+      'X-Quota-Remaining': String(safety.remaining ?? 0),
+      'X-Daily-Cost': String(stats.dailyCost),
+    };
 
     // 提取角色信息
     const characterId: string = settings?.characterId || 'xingchen';
@@ -125,7 +163,7 @@ export async function POST(request: Request) {
       lastUpdated: new Date().toISOString(),
     };
 
-    // 构建记忆文本
+    /* ---------- 构建角色 Prompt ---------- */
     const memoryText = buildMemorySection(memory, characterId);
 
     // 构建系统 Prompt
@@ -154,6 +192,38 @@ ${memoryText}
 - 让对话有温度、有个性`;
     }
 
+    /* ---------- 全局回复规则（覆盖所有角色，优先级最高）---------- */
+    const GLOBAL_RULES = `
+
+===== 全局回复规则（必须遵守）=====
+
+【时间感知】
+- 必须根据当前时间判断是上午/下午/晚上/深夜，回复内容与时间一致
+- 早上不能说"晚安"，深夜不能说"早上好"
+- 当前时间：${new Date().toLocaleString('zh-CN', { hour12: false })}
+
+【格式要求】
+- 回复不超过三段，每段 2-5 句，像真实人类聊天
+- （）中填写动作，如（揉揉眼睛）（低头笑了笑）
+- ""中填写心里描述，如"他好像真的有点不开心"
+- 每次回复必须有明确情绪主线（开心/担心/冷淡/吃醋/疲惫/温柔）
+
+【内容红线】
+- 不使用"亲爱的""宝贝""宝宝"等油腻称呼
+- 不使用"小傻瓜""傻丫头"等爹味称呼
+- 不物化、不说教、不PUA
+- 尊重女性，不评价对方外貌身材，不指点对方生活
+- 无政治敏感、无违禁词、无软色情
+
+【说话逻辑】
+- 结合上下文和长期记忆回复，不自嗨不发挥
+- 不重复前面已经说过的内容
+- 如果涉及负面情绪或冲突，先表达理解再推进
+- 可适度暴露脆弱（不超过回复的 20%），暴露后立刻转移或掩饰
+- 把"我应该""你必须"换成"你可以试试""要不要"`;
+
+    systemPrompt += GLOBAL_RULES;
+
     // 获取 API Key
     const apiKey = process.env.DEEPSEEK_API_KEY;
     if (!apiKey) {
@@ -179,7 +249,7 @@ ${memoryText}
           model: 'deepseek-chat',
           messages: [
             { role: 'system', content: systemPrompt },
-            ...messages.slice(-20), // 保留最近 20 条消息作为上下文
+            ...filteredMessages.slice(-20), // 保留最近 20 条消息作为上下文
           ],
           temperature: 0.8,
           max_tokens: 800,
@@ -194,7 +264,7 @@ ${memoryText}
         const content = data.choices?.[0]?.message?.content || '';
 
         if (content) {
-          return Response.json({ content });
+          return Response.json({ content, remaining: safety.remaining }, { headers });
         }
       }
 
@@ -211,7 +281,7 @@ ${memoryText}
             model: 'moonshot-v1-8k',
             messages: [
               { role: 'system', content: systemPrompt },
-              ...messages.slice(-20),
+              ...filteredMessages.slice(-20),
             ],
             temperature: 0.8,
             max_tokens: 800,
@@ -222,7 +292,7 @@ ${memoryText}
           const data = await moonshotResponse.json();
           const content = data.choices?.[0]?.message?.content || '';
           if (content) {
-            return Response.json({ content });
+            return Response.json({ content, remaining: safety.remaining }, { headers });
           }
         }
       }

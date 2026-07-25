@@ -1,25 +1,29 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import type { CharacterId, Message, Memory, DisplayCharacter, CustomCharacter, ChatSettings } from '../data/types';
 import { PRESET_CHARACTERS, getPresetCharacter, isPresetCharacter, customToConfig, toDisplay } from '../data/characters';
 import { createDefaultMemory } from '../data/memory-defaults';
 import Sidebar from './components/Sidebar';
 import ChatWindow from './components/ChatWindow';
 import SettingsModal from './components/SettingsModal';
+import InviteCodeModal from './components/InviteCodeModal';
 
-// localStorage key 常量
+// localStorage keys
 const KEY_CHAT = (id: string) => `companion_chat_${id}`;
 const KEY_MEMORY = (id: string) => `companion_memory_${id}`;
 const KEY_CUSTOM_CHARS = 'companion_custom_chars';
 const KEY_AVATARS = 'companion_avatars';
 const KEY_ACTIVE = 'companion_active';
+const KEY_SESSION = 'auth_session';
+const KEY_VIP = 'auth_vip';
 
-// 旧数据迁移
+// old data migration
 const OLD_NAME_TO_ID: Record<string, string> = {
-  '星尘': 'xingchen',
-  '墨离': 'moli',
-  '云曦': 'yunxi',
+  '星尘': 'ji_linyuan',
+  '墨离': 'lu_yanzhou',
+  '云曦': 'yu_wen',
 };
 
 interface ChatClientProps {
@@ -30,31 +34,34 @@ interface ChatClientProps {
 type ModalMode = { type: 'edit'; charId: CharacterId } | { type: 'create' } | null;
 
 export default function ChatClient({ initialCharacterId, initialSettings }: ChatClientProps) {
+  const router = useRouter();
   const [activeId, setActiveId] = useState<CharacterId>(initialCharacterId);
   const [messagesByChar, setMessagesByChar] = useState<Record<string, Message[]>>({});
   const [memoryByChar, setMemoryByChar] = useState<Record<string, Memory>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [modalMode, setModalMode] = useState<ModalMode>(null);
+  const [showUpgrade, setShowUpgrade] = useState(false);
+  const [upgradeCharName, setUpgradeCharName] = useState('');
+  const [isVip, setIsVip] = useState(false);
+  const [quotaByChar, setQuotaByChar] = useState<Record<string, number>>({});
 
-  // 自定义角色列表
   const [customChars, setCustomChars] = useState<CustomCharacter[]>([]);
-  // 头像覆盖（per character ID）: id -> avatar url/base64
   const [avatarOverrides, setAvatarOverrides] = useState<Record<string, string>>({});
 
   const messageCountRef = useRef<Record<string, number>>({});
 
-  // 获取所有角色（预设 + 自定义）
-  const allCharacters = [...PRESET_CHARACTERS, ...customChars.map(customToConfig)];
-
-  // 初始化
+  // initialization
   useEffect(() => {
+    const authToken = localStorage.getItem('auth_token');
+    if (!authToken) { router.push('/login'); return; }
+    setIsVip(localStorage.getItem(KEY_VIP) === 'true');
+
     const initMsgs: Record<string, Message[]> = {};
     const initMems: Record<string, Memory> = {};
     const initCounts: Record<string, number> = {};
     const initAvatars: Record<string, string> = {};
 
-    // 迁移旧数据
     Object.entries(OLD_NAME_TO_ID).forEach(([name, id]) => {
       const oldKey = KEY_CHAT(name);
       const newKey = KEY_CHAT(id);
@@ -69,7 +76,6 @@ export default function ChatClient({ initialCharacterId, initialSettings }: Chat
       }
     });
 
-    // 加载所有预设角色数据
     PRESET_CHARACTERS.forEach((char) => {
       const saved = localStorage.getItem(KEY_CHAT(char.id));
       initMsgs[char.id] = safeParseArray(saved)?.slice(-500) || [];
@@ -77,7 +83,6 @@ export default function ChatClient({ initialCharacterId, initialSettings }: Chat
       initCounts[char.id] = initMsgs[char.id].length;
     });
 
-    // 加载自定义角色
     const savedCustom = localStorage.getItem(KEY_CUSTOM_CHARS);
     const parsedCustom: CustomCharacter[] = safeParseArray(savedCustom) || [];
     setCustomChars(parsedCustom);
@@ -89,16 +94,9 @@ export default function ChatClient({ initialCharacterId, initialSettings }: Chat
       initCounts[cc.id] = initMsgs[cc.id].length;
     });
 
-    // 加载头像覆盖
     const savedAvatars = localStorage.getItem(KEY_AVATARS);
-    if (savedAvatars) {
-      try { Object.assign(initAvatars, JSON.parse(savedAvatars)); } catch {}
-    }
-
-    // URL 带来自定义头像时合并进去
-    if (initialSettings.avatar) {
-      initAvatars[initialCharacterId] = initialSettings.avatar;
-    }
+    if (savedAvatars) { try { Object.assign(initAvatars, JSON.parse(savedAvatars)); } catch {} }
+    if (initialSettings.avatar) initAvatars[initialCharacterId] = initialSettings.avatar;
 
     setMessagesByChar(initMsgs);
     setMemoryByChar(initMems);
@@ -109,44 +107,28 @@ export default function ChatClient({ initialCharacterId, initialSettings }: Chat
     if (savedActive) setActiveId(savedActive);
   }, []);
 
-  // 持久化
+  // persist
   useEffect(() => {
-    Object.entries(messagesByChar).forEach(([id, msgs]) => {
-      localStorage.setItem(KEY_CHAT(id), JSON.stringify(msgs.slice(-500)));
-    });
-    Object.entries(memoryByChar).forEach(([id, mem]) => {
-      localStorage.setItem(KEY_MEMORY(id), JSON.stringify(mem));
-    });
+    Object.entries(messagesByChar).forEach(([id, msgs]) => localStorage.setItem(KEY_CHAT(id), JSON.stringify(msgs.slice(-500))));
+    Object.entries(memoryByChar).forEach(([id, mem]) => localStorage.setItem(KEY_MEMORY(id), JSON.stringify(mem)));
     localStorage.setItem(KEY_ACTIVE, activeId);
   }, [messagesByChar, memoryByChar, activeId]);
 
-  useEffect(() => {
-    localStorage.setItem(KEY_CUSTOM_CHARS, JSON.stringify(customChars));
-  }, [customChars]);
+  useEffect(() => { localStorage.setItem(KEY_CUSTOM_CHARS, JSON.stringify(customChars)); }, [customChars]);
+  useEffect(() => { localStorage.setItem(KEY_AVATARS, JSON.stringify(avatarOverrides)); }, [avatarOverrides]);
 
-  useEffect(() => {
-    localStorage.setItem(KEY_AVATARS, JSON.stringify(avatarOverrides));
-  }, [avatarOverrides]);
-
-  // 获取显示角色
+  // get display character
   const getDisplayChar = useCallback(
     (id: string): DisplayCharacter => {
-      // 先查预设
-      if (isPresetCharacter(id)) {
-        return toDisplay(getPresetCharacter(id), avatarOverrides[id]);
-      }
-      // 再查自定义
+      if (isPresetCharacter(id as any)) return toDisplay(getPresetCharacter(id as any), avatarOverrides[id]);
       const cc = customChars.find((c) => c.id === id);
-      if (cc) {
-        return toDisplay(customToConfig(cc), avatarOverrides[id]);
-      }
-      // fallback
-      return toDisplay(getPresetCharacter('xingchen'));
+      if (cc) return toDisplay(customToConfig(cc), avatarOverrides[id]);
+      return toDisplay(getPresetCharacter('ji_linyuan'));
     },
     [customChars, avatarOverrides]
   );
 
-  // 保存设定（编辑模式）
+  // settings save
   const handleSaveSettings = useCallback(
     (settings: { avatar: string }) => {
       setAvatarOverrides((prev) => ({ ...prev, [activeId]: settings.avatar }));
@@ -155,33 +137,54 @@ export default function ChatClient({ initialCharacterId, initialSettings }: Chat
     [activeId]
   );
 
-  // 创建自定义角色
-  const handleCreateCharacter = useCallback((cc: CustomCharacter) => {
-    const id = `custom_${Date.now()}`;
-    const newChar: CustomCharacter = { ...cc, id, createdAt: new Date().toISOString() };
-    setCustomChars((prev) => [...prev, newChar]);
-    setMessagesByChar((prev) => ({ ...prev, [id]: [] }));
-    setMemoryByChar((prev) => ({ ...prev, [id]: createDefaultMemory() }));
-    if (cc.avatar) {
-      const av = cc.avatar;
-      setAvatarOverrides((prev) => ({ ...prev, [id]: av }));
-    }
-    setActiveId(id);
-    setModalMode(null);
-  }, []);
+  // invite code upgrade
+  const handleUpgrade = useCallback(async (code: string) => {
+    const sessionId = localStorage.getItem(KEY_SESSION) || '';
+    try {
+      const res = await fetch('/api/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ upgrade: code, sessionId }) });
+      const data = await res.json();
+      if (res.ok && data.vip) {
+        localStorage.setItem('auth_token', data.token);
+        localStorage.setItem(KEY_VIP, 'true');
+        setIsVip(true);
+        setShowUpgrade(false);
+        setQuotaByChar((prev) => ({ ...prev, [activeId]: -1 }));
+      } else alert(data.error || '邀请码无效');
+    } catch { alert('网络错误'); }
+  }, [activeId]);
 
-  // 删除自定义角色
+  // create custom character
+  const handleCreateCharacter = useCallback(
+    (cc: CustomCharacter) => {
+      if (!isVip && customChars.length >= 1) {
+        alert('免费用户只能创建 1 个自定义角色，输入邀请码升级后可无限创建');
+        setModalMode(null);
+        return;
+      }
+      const id = `custom_${Date.now()}`;
+      const newChar: CustomCharacter = { ...cc, id, createdAt: new Date().toISOString() };
+      setCustomChars((prev) => [...prev, newChar]);
+      setMessagesByChar((prev) => ({ ...prev, [id]: [] }));
+      setMemoryByChar((prev) => ({ ...prev, [id]: createDefaultMemory() }));
+      if (cc.avatar) setAvatarOverrides((prev) => ({ ...prev, [id]: cc.avatar! }));
+      setActiveId(id);
+      setModalMode(null);
+    },
+    [isVip, customChars]
+  );
+
+  // delete custom character
   const handleDeleteCharacter = useCallback((id: string) => {
     setCustomChars((prev) => prev.filter((c) => c.id !== id));
     setMessagesByChar((prev) => { const n = { ...prev }; delete n[id]; return n as Record<string, Message[]>; });
     setMemoryByChar((prev) => { const n = { ...prev }; delete n[id]; return n as Record<string, Memory>; });
-    setAvatarOverrides((prev) => { const next = { ...prev }; delete next[id]; return next as Record<string, string>; });
+    setAvatarOverrides((prev) => { const { [id]: _, ...rest } = prev; return rest; });
     localStorage.removeItem(KEY_CHAT(id));
     localStorage.removeItem(KEY_MEMORY(id));
-    if (activeId === id) setActiveId('xingchen');
+    if (activeId === id) setActiveId('ji_linyuan');
   }, [activeId]);
 
-  // 发送消息
+  // send message
   const handleSend = useCallback(
     async (content: string) => {
       const display = getDisplayChar(activeId);
@@ -208,6 +211,7 @@ export default function ChatClient({ initialCharacterId, initialSettings }: Chat
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
+            token: localStorage.getItem('auth_token') || '',
             messages: updatedMessages,
             settings: {
               characterId: display.id,
@@ -220,17 +224,26 @@ export default function ChatClient({ initialCharacterId, initialSettings }: Chat
             },
           }),
         });
+
         const data = await res.json();
+        if (!res.ok && data.error) {
+          setMessagesByChar((prev) => ({ ...prev, [activeId]: currentMessages }));
+          if (res.status === 401) { localStorage.removeItem('auth_token'); router.push('/login'); return; }
+          if (res.status === 403 && data.needUpgrade) { setUpgradeCharName(display.name); setShowUpgrade(true); return; }
+          alert(data.error);
+          return;
+        }
+
         if (data.content) {
+          if (data.remaining !== undefined) setQuotaByChar((prev) => ({ ...prev, [activeId]: data.remaining }));
           const assistantMsg: Message = { role: 'assistant', content: data.content, timestamp: new Date().toISOString() };
-          setMessagesByChar((prev) => ({ ...prev, [activeId]: [...updatedMessages, assistantMsg] }));
+          const finalMessages = [...updatedMessages, assistantMsg];
+          setMessagesByChar((prev) => ({ ...prev, [activeId]: finalMessages }));
           const newCount = (messageCountRef.current[activeId] || 0) + 2;
           messageCountRef.current = { ...messageCountRef.current, [activeId]: newCount };
-          if (newCount % 6 === 0) {
-            triggerMemoryAnalysis(activeId, [...updatedMessages, assistantMsg], updatedMem);
-          }
+          if (newCount % 6 === 0) triggerMemoryAnalysis(activeId, finalMessages, updatedMem);
         }
-      } catch (err) { console.error('发送失败:', err); }
+      } catch (err) { console.error('send error:', err); }
       finally { setIsLoading(false); }
     },
     [activeId, messagesByChar, memoryByChar, getDisplayChar]
@@ -238,27 +251,49 @@ export default function ChatClient({ initialCharacterId, initialSettings }: Chat
 
   async function triggerMemoryAnalysis(charId: string, msgs: Message[], mem: Memory) {
     try {
-      const res = await fetch('/api/memory', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ conversation: msgs.slice(-20), existingMemory: mem, characterId: charId }),
-      });
+      const res = await fetch('/api/memory', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ conversation: msgs.slice(-20), existingMemory: mem, characterId: charId }) });
       const data = await res.json();
       if (data.memory) setMemoryByChar((prev) => ({ ...prev, [charId]: data.memory }));
     } catch {}
   }
 
+  // switch character
   const handleCharacterSwitch = useCallback((id: CharacterId) => {
     setActiveId(id);
     setSidebarCollapsed(true);
   }, []);
 
+  // new chat
   const handleNewChat = useCallback((id: CharacterId) => {
     const display = getDisplayChar(id);
     if (!window.confirm(`确定要开始和${display.name}的新对话吗？旧对话将被清除，记忆保留。`)) return;
     setMessagesByChar((prev) => ({ ...prev, [id]: [] }));
     if (id !== activeId) setActiveId(id);
   }, [activeId, getDisplayChar]);
+
+  // export chat
+  const handleExportChat = useCallback(() => {
+    const allChars = [...PRESET_CHARACTERS, ...customChars];
+    let text = '';
+    allChars.forEach((char) => {
+      const msgs = messagesByChar[char.id] || [];
+      if (msgs.length === 0) return;
+      const mem = memoryByChar[char.id];
+      text += `===== ${char.name}（${char.title || '自定义'}）=====\n`;
+      if (mem?.conversationSummary) text += `摘要：${mem.conversationSummary}\n`;
+      text += `消息数：${msgs.length}\n\n`;
+      msgs.forEach((m) => {
+        const t = new Date(m.timestamp).toLocaleString('zh-CN', { hour12: false });
+        text += `[${t}] ${m.role === 'user' ? '用户' : char.name}：${m.content.replace(/^(TRANSFER_CARD|SHOP_CARD|FOOD_CARD|PHOTO_CARD):/, '[$1] ')}\n`;
+      });
+    });
+    if (!text) { alert('暂无聊天记录可导出'); return; }
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `chat-export-${new Date().toISOString().slice(0, 10)}.txt`; a.click();
+    URL.revokeObjectURL(url);
+  }, [messagesByChar, memoryByChar, customChars]);
 
   const displayChar = getDisplayChar(activeId);
   const activeMessages = messagesByChar[activeId] || [];
@@ -278,6 +313,9 @@ export default function ChatClient({ initialCharacterId, initialSettings }: Chat
         onCreateCharacter={() => setModalMode({ type: 'create' })}
         onDeleteCharacter={handleDeleteCharacter}
         avatarOverrides={avatarOverrides}
+        isVip={isVip}
+        onUpgrade={() => { setUpgradeCharName('VIP 升级'); setShowUpgrade(true); }}
+        onExport={handleExportChat}
       />
       <ChatWindow
         character={displayChar}
@@ -295,9 +333,16 @@ export default function ChatClient({ initialCharacterId, initialSettings }: Chat
           character={modalMode.type === 'edit' ? (getDisplayChar(modalMode.charId) ?? undefined) : undefined}
           onSave={modalMode.type === 'edit' ? handleSaveSettings : handleCreateCharacter}
           onClose={() => setModalMode(null)}
-          onDelete={modalMode.type === 'edit' && !isPresetCharacter(modalMode.charId)
+          onDelete={modalMode.type === 'edit' && !isPresetCharacter(modalMode.charId as any)
             ? () => { handleDeleteCharacter(modalMode.charId); setModalMode(null); }
             : undefined}
+        />
+      )}
+      {showUpgrade && (
+        <InviteCodeModal
+          charName={upgradeCharName}
+          onUpgrade={handleUpgrade}
+          onClose={() => setShowUpgrade(false)}
         />
       )}
     </div>

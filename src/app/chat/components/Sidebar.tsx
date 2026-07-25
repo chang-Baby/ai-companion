@@ -14,21 +14,27 @@ interface SidebarProps {
   onCreateCharacter: () => void;
   onDeleteCharacter: (id: string) => void;
   avatarOverrides: Record<string, string>;
+  isVip: boolean;
+  onUpgrade: () => void;
+  onExport: () => void;
 }
 
 function isImageUrl(s: string): boolean {
-  return s.startsWith('data:') || s.startsWith('http');
+  return s.startsWith('data:') || s.startsWith('http') || s.startsWith('/');
 }
 
+// Character emoji field now contains a path like "/avatars/ji_linyuan.jpg"
 function getAvatar(char: CharacterConfig | CustomCharacter, overrides: Record<string, string>): string {
   if (overrides[char.id]) return overrides[char.id];
+  // For preset characters, emoji is a path starting with /
+  if (char.emoji.startsWith('/')) return char.emoji;
   if ('avatar' in char && char.avatar) return char.avatar!;
   return char.emoji;
 }
 
 export default function Sidebar({
   presetChars, customChars, activeId, onSelect, onNewChat,
-  collapsed, onToggle, onOpenSettings, onCreateCharacter, onDeleteCharacter, avatarOverrides,
+  collapsed, onToggle, onOpenSettings, onCreateCharacter, onDeleteCharacter, avatarOverrides, isVip, onUpgrade, onExport,
 }: SidebarProps) {
   return (
     <>
@@ -93,6 +99,13 @@ export default function Sidebar({
             );
           })}
 
+          {/* 升级 VIP */}
+          {!isVip && (
+            <div className="sidebar-upgrade-btn" onClick={onUpgrade}>
+              <span>⭐</span>
+              <span>升级 VIP</span>
+            </div>
+          )}
           {/* 新建按钮 */}
           <div className="sidebar-add-btn" onClick={onCreateCharacter}>
             <span>➕</span>
@@ -101,6 +114,9 @@ export default function Sidebar({
         </div>
 
         <div className="sidebar-footer">
+          <div className="sidebar-export-btn" onClick={onExport}>
+            📥 导出聊天记录
+          </div>
           <a href="/" className="sidebar-back-link">← 返回首页</a>
         </div>
       </aside>
