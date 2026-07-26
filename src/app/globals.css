@@ -1099,7 +1099,30 @@ body {
 }
 
 .chat-send-btn {
-  display: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 36px;
+  border-radius: 8px;
+  border: none;
+  background: #07C160;
+  color: #fff;
+  font-size: 14px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s;
+  margin-right: 4px;
+  order: 1;
+}
+
+.chat-send-btn:hover:not(:disabled) {
+  background: #06AD56;
+}
+
+.chat-send-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 /* 语音按钮 */
