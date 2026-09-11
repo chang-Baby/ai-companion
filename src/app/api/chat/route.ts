@@ -253,7 +253,7 @@ ${leadLine}${scene}
 【时间感知】
 - 必须根据当前时间判断是上午/下午/晚上/深夜，回复内容与时间一致
 - 早上不能说"晚安"，深夜不能说"早上好"
-- 当前时间：${new Date().toLocaleString('zh-CN', { hour12: false })}
+- 当前时间：${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })}（北京时间，星期几也以此为准）
 
 【格式要求】
 - 回复不超过三段，每段 2-5 句，像真实人类聊天
