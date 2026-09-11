@@ -197,12 +197,16 @@ export async function POST(request: Request) {
   }
   if (!text) return Response.json({ error: 'empty_text' }, { status: 200 });
 
-  const appId = process.env.XUNFEI_APPID;
-  const apiKey = process.env.XUNFEI_API_KEY;
-  const apiSecret = process.env.XUNFEI_API_SECRET;
-  if (!appId || !apiKey || !apiSecret) {
-    return Response.json({ error: 'tts_unavailable' }, { status: 503 });
+  const envKeys = ['XUNFEI_APPID', 'XUNFEI_API_KEY', 'XUNFEI_API_SECRET'] as const;
+  const envVals = Object.fromEntries(envKeys.map((k) => [k, process.env[k]])) as Record<(typeof envKeys)[number], string | undefined>;
+  const missing = envKeys.filter((k) => !envVals[k]);
+  if (missing.length) {
+    // 诊断：只返回缺失的变量名，不泄露任何值
+    return Response.json({ error: 'tts_unavailable', missing, configured: envKeys.filter((k) => envVals[k]) }, { status: 503 });
   }
+  const appId = envVals.XUNFEI_APPID!;
+  const apiKey = envVals.XUNFEI_API_KEY!;
+  const apiSecret = envVals.XUNFEI_API_SECRET!;
 
   try {
     let audio: Buffer | null = null;
