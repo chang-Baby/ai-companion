@@ -173,3 +173,72 @@ export function fullSafetyCheck(sessionId: string, charId: string, textLen: numb
   if (!cb.allowed) return { pass: false, error: cb.reason, status: 503 };
   return { pass: true, remaining: -1 }; // -1 = 无限
 }
+
+/* ============================================================
+   签名配额票据（serverless 适用）
+   背景：Netlify 等 serverless 平台文件系统临时、实例间不共享，
+   原 .data/ 文件配额在线上会丢。改为：服务端 HMAC 签发票据，
+   客户端保管并随每次请求带上，服务端验签后扣次重签。
+   票据格式: base64url(payload).base64url(hmac)
+   payload: { v:1, p:{ charId: remaining }, vip:0|1 }
+   ============================================================ */
+function ticketSecret(): string {
+  return process.env.ACCESS_CODE_SECRET || 'ai-companion-salt-2026';
+}
+
+function encodePayload(obj: unknown): string {
+  return Buffer.from(JSON.stringify(obj), 'utf8').toString('base64url');
+}
+
+function signBody(body: string): string {
+  return crypto.createHmac('sha256', ticketSecret()).update(body).digest('base64url');
+}
+
+export type QuotaTicketPayload = { v: number; p: Record<string, number>; vip: number };
+
+// 签发一张新票（登录发 basic 票；邀请码升级发 vip 票）
+export function issueQuotaTicket(vip = false): string {
+  const body = encodePayload({ v: 1, p: {}, vip: vip ? 1 : 0 });
+  return `${body}.${signBody(body)}`;
+}
+
+export function parseQuotaTicket(ticket: string | null | undefined): {
+  valid: boolean; vip: boolean; quotas: Record<string, number>;
+} {
+  try {
+    if (!ticket || typeof ticket !== 'string') return { valid: false, vip: false, quotas: {} };
+    const [body, sig] = ticket.split('.');
+    if (!body || !sig) return { valid: false, vip: false, quotas: {} };
+    const a = Buffer.from(sig);
+    const b = Buffer.from(signBody(body));
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+      return { valid: false, vip: false, quotas: {} };
+    }
+    const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as QuotaTicketPayload;
+    if (payload.v !== 1 || typeof payload.p !== 'object') return { valid: false, vip: false, quotas: {} };
+    return { valid: true, vip: payload.vip === 1, quotas: payload.p || {} };
+  } catch {
+    return { valid: false, vip: false, quotas: {} };
+  }
+}
+
+// 消耗一次配额：basic 用户按角色扣减；vip 不扣。票缺失/伪造时当新用户发新票
+export function consumeQuotaTicket(ticket: string | null | undefined, charId: string): {
+  pass: boolean; needUpgrade?: boolean; remaining: number; newTicket: string; vip: boolean;
+} {
+  const parsed = parseQuotaTicket(ticket);
+  if (!parsed.valid) {
+    // 老用户/清过缓存：补发一张满额新票，再正常扣一次
+    return consumeQuotaTicket(issueQuotaTicket(false), charId);
+  }
+  if (parsed.vip) {
+    return { pass: true, remaining: -1, newTicket: ticket as string, vip: true };
+  }
+  const cur = typeof parsed.quotas[charId] === 'number' ? parsed.quotas[charId] : QUOTA_PER_CHAR;
+  if (cur <= 0) {
+    return { pass: false, needUpgrade: true, remaining: 0, newTicket: ticket as string, vip: false };
+  }
+  const next = cur - 1;
+  const body = encodePayload({ v: 1, p: { ...parsed.quotas, [charId]: next }, vip: 0 });
+  return { pass: true, remaining: next, newTicket: `${body}.${signBody(body)}`, vip: false };
+}

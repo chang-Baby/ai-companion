@@ -1,6 +1,6 @@
 import type { CharacterId, Memory, Message } from '../../data/types';
 import { getPresetCharacter, isPresetCharacter } from '../../data/characters';
-import { parseToken, fullSafetyCheck, getDailyStats } from '../../../lib/safety';
+import { parseToken, consumeQuotaTicket } from '../../../lib/safety';
 
 /* ============================================================
    Chat API — AI 对话接口（受三层防护）
@@ -109,7 +109,7 @@ function generateFallbackReply(style: string, userName: string): string {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { messages, settings, token } = body;
+    const { messages, settings, token, quotaTicket } = body;
     const isProactive: boolean = settings?.proactive === true;
 
     // 主动关怀模式允许空历史（AI 先开口）；普通模式消息不能为空
@@ -133,19 +133,18 @@ export async function POST(request: Request) {
   })).filter(m => m.content !== '');
   const lastMsg = (filteredMessages[filteredMessages.length - 1]?.content || '');
     const charId = settings?.characterId || 'xingchen';
-    const safety = fullSafetyCheck(sessionId, charId, lastMsg.length);
-    if (!safety.pass) {
+    const quota = consumeQuotaTicket(typeof quotaTicket === 'string' ? quotaTicket : '', charId);
+    if (!quota.pass) {
       return Response.json(
-        { error: safety.error, remaining: safety.remaining, retryAfter: safety.retryAfter, needUpgrade: safety.needUpgrade },
-        { status: safety.status || 403 }
+        { error: '该角色免费对话已用完，请输入邀请码继续', remaining: 0, needUpgrade: true, quotaTicket: quota.newTicket },
+        { status: 403, headers: { 'X-Quota-Ticket': quota.newTicket } }
       );
     }
 
-    // 附加配额和成本信息到响应头
-    const stats = getDailyStats();
+    // 新签名票据随每个成功响应回传，客户端必须更新本地缓存
     const headers: Record<string, string> = {
-      'X-Quota-Remaining': String(safety.remaining ?? 0),
-      'X-Daily-Cost': String(stats.dailyCost),
+      'X-Quota-Remaining': String(quota.remaining),
+      'X-Quota-Ticket': quota.newTicket,
     };
 
     // 提取角色信息
@@ -315,8 +314,8 @@ ${leadLine}${scene}
     if (!apiKey) {
       console.error('DEEPSEEK_API_KEY 未配置');
       return Response.json(
-        { content: generateFallbackReply(style, '朋友') },
-        { status: 200 }
+        { content: generateFallbackReply(style, '朋友'), remaining: quota.remaining, quotaTicket: quota.newTicket },
+        { status: 200, headers }
       );
     }
 
@@ -350,7 +349,7 @@ ${leadLine}${scene}
         const content = data.choices?.[0]?.message?.content || '';
 
         if (content) {
-          return Response.json({ content, remaining: safety.remaining }, { headers });
+          return Response.json({ content, remaining: quota.remaining, quotaTicket: quota.newTicket }, { headers });
         }
       }
 
@@ -378,7 +377,7 @@ ${leadLine}${scene}
           const data = await moonshotResponse.json();
           const content = data.choices?.[0]?.message?.content || '';
           if (content) {
-            return Response.json({ content, remaining: safety.remaining }, { headers });
+            return Response.json({ content, remaining: quota.remaining, quotaTicket: quota.newTicket }, { headers });
           }
         }
       }
@@ -386,13 +385,13 @@ ${leadLine}${scene}
       // 全部失败，使用 fallback
       const lastUserMsg = [...messages].reverse().find((m: Message) => m.role === 'user');
       const userName = lastUserMsg?.content?.slice(0, 10) || '朋友';
-      return Response.json({ content: generateFallbackReply(style, userName) });
+      return Response.json({ content: generateFallbackReply(style, userName), remaining: quota.remaining, quotaTicket: quota.newTicket }, { headers });
     } catch (fetchError) {
       clearTimeout(timeout);
       console.error('API 请求失败:', fetchError);
       const lastUserMsg = [...messages].reverse().find((m: Message) => m.role === 'user');
       const userName = lastUserMsg?.content?.slice(0, 10) || '朋友';
-      return Response.json({ content: generateFallbackReply(style, userName) });
+      return Response.json({ content: generateFallbackReply(style, userName), remaining: quota.remaining, quotaTicket: quota.newTicket }, { headers });
     }
   } catch (error) {
     console.error('Chat API 错误:', error);

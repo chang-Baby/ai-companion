@@ -25,6 +25,7 @@ export default function LoginPage() {
         localStorage.setItem('auth_token', data.token);
         localStorage.setItem('auth_session', data.sessionId);
         localStorage.setItem('auth_vip', 'false');
+        if (data.quotaTicket) localStorage.setItem('auth_quota_ticket', data.quotaTicket);
         router.push('/chat?character=ji_linyuan');
       } else {
         setError(data.error || '密码错误');

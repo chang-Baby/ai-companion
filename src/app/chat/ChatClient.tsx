@@ -22,6 +22,7 @@ const KEY_AVATARS = 'companion_avatars';
 const KEY_ACTIVE = 'companion_active';
 const KEY_SESSION = 'auth_session';
 const KEY_VIP = 'auth_vip';
+const KEY_TICKET = 'auth_quota_ticket';
 const KEY_THEME = 'companion_theme';
 const KEY_LAST_OPEN = 'companion_last_open';
 const KEY_MEM_FOLLOWED = 'companion_mem_followed';
@@ -101,6 +102,7 @@ export default function ChatClient({ initialCharacterId, initialSettings }: Chat
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           token: localStorage.getItem('auth_token') || '',
+          quotaTicket: localStorage.getItem(KEY_TICKET) || '',
           messages: history.slice(-20),
           settings: {
             characterId: display.id,
@@ -125,6 +127,7 @@ export default function ChatClient({ initialCharacterId, initialSettings }: Chat
           proactive: true,
         };
         setMessagesByChar((prev) => ({ ...prev, [charId]: [...(prev[charId] || []), careMsg] }));
+        if (data.quotaTicket) localStorage.setItem(KEY_TICKET, data.quotaTicket);
         if (data.remaining !== undefined) {
           setQuotaByChar((prev) => ({ ...prev, [charId]: data.remaining }));
         }
@@ -400,6 +403,7 @@ export default function ChatClient({ initialCharacterId, initialSettings }: Chat
       if (res.ok && data.vip) {
         localStorage.setItem('auth_token', data.token);
         localStorage.setItem(KEY_VIP, 'true');
+        if (data.quotaTicket) localStorage.setItem(KEY_TICKET, data.quotaTicket);
         setIsVip(true);
         setShowUpgrade(false);
         setQuotaByChar((prev) => ({ ...prev, [activeId]: -1 }));
@@ -470,6 +474,7 @@ export default function ChatClient({ initialCharacterId, initialSettings }: Chat
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             token: localStorage.getItem('auth_token') || '',
+            quotaTicket: localStorage.getItem(KEY_TICKET) || '',
             messages: updatedMessages,
             settings: {
               characterId: display.id,
@@ -494,6 +499,7 @@ export default function ChatClient({ initialCharacterId, initialSettings }: Chat
         }
 
         if (data.content) {
+          if (data.quotaTicket) localStorage.setItem(KEY_TICKET, data.quotaTicket);
           if (data.remaining !== undefined) setQuotaByChar((prev) => ({ ...prev, [activeId]: data.remaining }));
           const assistantMsg: Message = { role: 'assistant', content: data.content, timestamp: new Date().toISOString() };
           const finalMessages = [...updatedMessages, assistantMsg];
