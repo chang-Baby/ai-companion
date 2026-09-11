@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>音色试听室 · 栖</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    background: radial-gradient(ellipse at top, #1a1d29 0%, #0d0f16 60%);
+    color: #e8e6f0; font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    min-height:100vh; padding: 32px 24px 80px;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+  h1 { font-size: 26px; font-weight: 600; letter-spacing: 2px; margin-bottom: 6px; }
+  h1 span { color: #a78bfa; }
+  .sub { color: #8b88a0; font-size: 14px; margin-bottom: 20px; line-height: 1.7; }
+  .line-box {
+    background: rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08);
+    border-radius: 12px; padding: 14px 16px; margin-bottom: 28px; display:flex; gap:10px; align-items:center;
+  }
+  .line-box label { font-size:13px; color:#a78bfa; white-space:nowrap; }
+  #line {
+    flex:1; background: transparent; border: none; outline: none;
+    color: #e8e6f0; font-size: 15px; font-family: inherit;
+  }
+  h2 { font-size:15px; color:#a78bfa; font-weight:600; margin: 26px 0 12px; letter-spacing:1px; }
+  .grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap:12px; }
+  .card {
+    background: rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08);
+    border-radius: 14px; padding: 14px 16px; cursor:pointer; transition: all .2s;
+    display:flex; flex-direction:column; gap:8px; user-select:none;
+  }
+  .card:hover { border-color: rgba(167,139,250,.5); background: rgba(167,139,250,.08); transform: translateY(-2px); }
+  .card.playing { border-color: #a78bfa; background: rgba(167,139,250,.15); box-shadow: 0 0 20px rgba(167,139,250,.25); }
+  .card.fail { opacity: .55; }
+  .row1 { display:flex; align-items:center; justify-content:space-between; }
+  .name { font-size:16px; font-weight:600; }
+  .badge { font-size:11px; padding:2px 8px; border-radius:20px; }
+  .badge.ok { background: rgba(52,211,153,.15); color:#34d399; }
+  .badge.try { background: rgba(251,191,36,.12); color:#fbbf24; }
+  .badge.bad { background: rgba(248,113,113,.15); color:#f87171; }
+  .tag { font-size:12px; color:#8b88a0; }
+  .vcn { font-size:11px; color:#5c5970; font-family: ui-monospace, monospace; }
+  .status { font-size:12px; min-height:18px; }
+  .status.loading { color:#fbbf24; }
+  .status.done { color:#34d399; }
+  .status.err { color:#f87171; }
+  .play-ico { font-size:20px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>音色试听室 · <span>栖</span></h1>
+  <div class="sub">点卡片试听 → 挑中喜欢的声音，把「名字」发给我就行。<br>黄色「待测」= 还没确认授权，点一下能播就是能用；播不出的会标红，忽略即可。</div>
+  <div class="line-box">
+    <label>试听台词</label>
+    <input id="line" value="嘿，怎么啦？跟我说说呗。不管发生什么，我都在这儿陪着你呢。">
+  </div>
+  <h2>👦 男声（四个角色候选）</h2>
+  <div class="grid" id="male"></div>
+  <h2>👧 女声（自定义角色候选）</h2>
+  <div class="grid" id="female"></div>
+</div>
+<script>
+const male = [
+  {vcn:'x6_tiexinnanyou_mini', name:'贴心男友', tag:'温柔陪伴感', ok:true},
+  {vcn:'x6_xiaonaigoudidi_mini', name:'小奶狗弟弟', tag:'少年感·黏人', ok:true},
+  {vcn:'x6_wennuancixingnansheng_mini', name:'温暖磁性男声', tag:'低音炮', ok:false},
+  {vcn:'x6_lingfeiyi_pro', name:'聆飞逸', tag:'交互聊天·清朗', ok:false},
+  {vcn:'x6_feizheChat_pro', name:'聆飞哲', tag:'交互聊天·沉稳', ok:false},
+  {vcn:'x6_lingfeibo_pro', name:'聆飞博', tag:'青叔·新闻质感', ok:false},
+  {vcn:'x6_lingfeihan_pro', name:'聆飞瀚', tag:'纪录片·低沉', ok:false},
+  {vcn:'x6_lingfeihao_pro', name:'聆飞皓', tag:'广告·明亮', ok:false},
+  {vcn:'x6_lingbosong_pro', name:'聆伯松', tag:'角色配音', ok:false},
+  {vcn:'x6_ruyadashu_pro', name:'儒雅大叔', tag:'成熟温和', ok:false},
+  {vcn:'x6_gaolengnanshen_pro', name:'高冷男神', tag:'清冷克制', ok:false},
+  {vcn:'x6_wenrounansheng_mini', name:'温柔男声', tag:'客服感·亲和', ok:false},
+  {vcn:'x6_taiqiangnuannan_pro', name:'台湾腔暖男', tag:'软萌腔调', ok:false},
+  {vcn:'x6_bokenansheng_pro', name:'播客男声', tag:'电台·松弛', ok:false},
+  {vcn:'x6_huoposhaonian_pro', name:'活泼少年', tag:'阳光开朗', ok:false},
+  {vcn:'x6_zhantingnanjiedai_pro', name:'展厅接待男声', tag:'正式大方', ok:false},
+  {vcn:'x6_daqixuanchuanpiannansheng_mini', name:'大气宣传片男声', tag:'厚重', ok:false},
+  {vcn:'x5_lingfeiyi_flow', name:'聆飞逸·免费版', tag:'自然男声', ok:false},
+];
+const female = [
+  {vcn:'x6_lingxiaoxuan_pro', name:'聆小璇', tag:'交互聊天·甜', ok:true},
+  {vcn:'x5_lingxiaoxuan_flow', name:'聆小璇·免费版', tag:'自然女声', ok:false},
+  {vcn:'x6_xiaoqiChat_pro', name:'聆小琪', tag:'交互聊天', ok:false},
+  {vcn:'x6_lingxiaoyue_pro', name:'聆小玥', tag:'交互聊天·柔', ok:false},
+  {vcn:'x6_lingyuyan_pro', name:'聆玉言', tag:'交互聊天', ok:false},
+  {vcn:'x6_lingxiaoli_pro', name:'聆小璃', tag:'交互聊天', ok:false},
+  {vcn:'x6_lingyouyou_pro', name:'聆佑佑', tag:'童感少女', ok:false},
+  {vcn:'x6_wumeinv_pro', name:'妩媚姐姐', tag:'成熟风情', ok:false},
+  {vcn:'x6_gufengxianv_mini', name:'古风侠女', tag:'清冷古风', ok:false},
+  {vcn:'x6_lingxiaoying_pro', name:'聆小颖', tag:'交互聊天', ok:false},
+  {vcn:'x6_lingxiaoyun_pro', name:'聆小芸', tag:'角色配音', ok:false},
+];
+
+let currentAudio = null, currentCard = null;
+
+function render(list, elId) {
+  const el = document.getElementById(elId);
+  list.forEach(v => {
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `
+      <div class="row1">
+        <span class="name">${v.name}</span>
+        <span class="badge ${v.ok?'ok':'try'}">${v.ok?'✓ 可用':'待测'}</span>
+      </div>
+      <div class="tag">${v.tag}</div>
+      <div class="vcn">${v.vcn}</div>
+      <div class="status">点击试听 ▶</div>`;
+    card.addEventListener('click', () => play(v, card));
+    el.appendChild(card);
+  });
+}
+render(male, 'male');
+render(female, 'female');
+
+async function play(v, card) {
+  if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+  if (currentCard) { currentCard.classList.remove('playing'); }
+  document.querySelectorAll('.card.playing').forEach(c => c.classList.remove('playing'));
+  card.classList.add('playing');
+  currentCard = card;
+  const st = card.querySelector('.status');
+  st.className = 'status loading'; st.textContent = '合成中…';
+  try {
+    const text = document.getElementById('line').value.trim() || '你好呀';
+    const r = await fetch('/api/tts', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ text, vcns:[v.vcn] })
+    });
+    const used = r.headers.get('X-TTS-Voice') || '';
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const blob = await r.blob();
+    if (used !== v.vcn) {
+      card.classList.remove('playing'); card.classList.add('fail');
+      const badge = card.querySelector('.badge');
+      badge.className = 'badge bad'; badge.textContent = '未授权';
+      st.className = 'status err'; st.textContent = '✗ 这个声音没开通，跳过';
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    currentAudio = new Audio(url);
+    st.className = 'status done'; st.textContent = '▶ 播放中…';
+    currentAudio.onended = () => { card.classList.remove('playing'); st.className='status done'; st.textContent='✓ 好听就选我'; };
+    currentAudio.onerror = () => { st.className='status err'; st.textContent='播放失败'; };
+    currentAudio.play();
+  } catch (e) {
+    card.classList.remove('playing');
+    st.className = 'status err'; st.textContent = '✗ 网络错误（热点？）';
+  }
+}
+</script>
+</body>
+</html>

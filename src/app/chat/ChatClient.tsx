@@ -2,13 +2,17 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import type { CharacterId, Message, Memory, DisplayCharacter, CustomCharacter, ChatSettings } from '../data/types';
+import type { CharacterId, Message, Memory, DisplayCharacter, CustomCharacter, ChatSettings, ChatTheme } from '../data/types';
 import { PRESET_CHARACTERS, getPresetCharacter, isPresetCharacter, customToConfig, toDisplay } from '../data/characters';
 import { createDefaultMemory } from '../data/memory-defaults';
+import { BG_PRESETS, BUBBLE_PRESETS } from '../data/themes';
 import Sidebar from './components/Sidebar';
 import ChatWindow from './components/ChatWindow';
 import SettingsModal from './components/SettingsModal';
 import InviteCodeModal from './components/InviteCodeModal';
+import EmotionCamera, { MOOD_FRESH_MS } from './components/EmotionCamera';
+import ProactivePopup from './components/ProactivePopup';
+import AppearancePanel from './components/AppearancePanel';
 
 // localStorage keys
 const KEY_CHAT = (id: string) => `companion_chat_${id}`;
@@ -18,6 +22,16 @@ const KEY_AVATARS = 'companion_avatars';
 const KEY_ACTIVE = 'companion_active';
 const KEY_SESSION = 'auth_session';
 const KEY_VIP = 'auth_vip';
+const KEY_THEME = 'companion_theme';
+const KEY_LAST_OPEN = 'companion_last_open';
+const KEY_MEM_FOLLOWED = 'companion_mem_followed';
+
+// 主动对话（由头触发，绝不是定时器）
+const PROACTIVE_MIN_GAP = 25 * 60 * 1000;   // 两次主动开口最小间隔：25 分钟
+const PROACTIVE_CHANCE = 0.35;              // 由头出现后随机开口概率：35%
+const IDLE_MS = 10 * 60 * 1000;             // 开着页面发呆 10 分钟
+const RETURNING_MS = 20 * 60 * 60 * 1000;   // 离开超过 20 小时算"久别"
+const PROACTIVE_POPUP_MS = 12000;           // 通知弹窗自动收起时间
 
 // old data migration
 const OLD_NAME_TO_ID: Record<string, string> = {
@@ -49,7 +63,151 @@ export default function ChatClient({ initialCharacterId, initialSettings }: Chat
   const [customChars, setCustomChars] = useState<CustomCharacter[]>([]);
   const [avatarOverrides, setAvatarOverrides] = useState<Record<string, string>>({});
 
+  // 外观主题（背景 + 气泡，本地保存）
+  const [theme, setTheme] = useState<ChatTheme>({ bg: 'night', bubble: 'ink' });
+  const [showAppearance, setShowAppearance] = useState(false);
+
+  // 主动消息通知弹窗（像朋友弹来的消息，不是静默加列表）
+  const [proactivePopup, setProactivePopup] = useState<{ charId: string; content: string } | null>(null);
+
   const messageCountRef = useRef<Record<string, number>>({});
+  const faceMoodRef = useRef<string | null>(null);
+  const faceMoodAtRef = useRef<number>(0);
+  // 摄像头实时识别到的表情（展示在情绪胶囊上；是否告诉 AI 由用户决定）
+  const [faceMoodState, setFaceMoodState] = useState<string | null>(null);
+  const lastProactiveAtRef = useRef(0);     // 上次主动开口时间（统一冷却）
+  const proactiveRunningRef = useRef(false);
+  const isLoadingRef = useRef(false);
+  isLoadingRef.current = isLoading;
+  // 由头触发系统：记录用户最后活动时间、离开页面时间
+  const lastActivityAtRef = useRef(Date.now());
+  const lastHiddenAtRef = useRef<number>(0);
+
+  // 主动开口：由头（reason）只决定"何时开口"，说什么完全由 AI 结合人设+记忆+上下文现生成
+  const triggerProactive = useCallback(async (reason: string) => {
+    const charId = activeIdRef.current;
+    const display = getDisplayCharRef.current(charId);
+    const mem = memoryByCharRef.current[charId] || createDefaultMemory();
+    const history = messagesByCharRef.current[charId] || [];
+    const mood = faceMoodRef.current && Date.now() - faceMoodAtRef.current < MOOD_FRESH_MS
+      ? faceMoodRef.current
+      : null;
+
+    setIsLoading(true);
+    proactiveRunningRef.current = true;
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          token: localStorage.getItem('auth_token') || '',
+          messages: history.slice(-20),
+          settings: {
+            characterId: display.id,
+            name: display.name,
+            personality: display.personality,
+            styleDesc: display.styleDesc,
+            description: display.description,
+            style: display.isPreset ? 'gentle' : 'custom',
+            memory: mem,
+            faceMood: mood,
+            proactive: true,
+            proactiveReason: reason,
+          },
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.content) {
+        const careMsg: Message = {
+          role: 'assistant',
+          content: data.content,
+          timestamp: new Date().toISOString(),
+          proactive: true,
+        };
+        setMessagesByChar((prev) => ({ ...prev, [charId]: [...(prev[charId] || []), careMsg] }));
+        if (data.remaining !== undefined) {
+          setQuotaByChar((prev) => ({ ...prev, [charId]: data.remaining }));
+        }
+        // 像朋友弹来的消息一样弹出通知，而不是静默躺在列表里
+        setProactivePopup({ charId, content: data.content });
+      }
+    } catch {
+      // 静默失败，不打扰用户
+    } finally {
+      setIsLoading(false);
+      proactiveRunningRef.current = false;
+    }
+  }, []);
+
+  // 统一闸门：冷却 + 不打断打字/回复 + 页面要可见 + 随机概率（情绪由头最紧急，跳过概率）
+  const attemptProactive = useCallback((reason: string, opts?: { skipChance?: boolean }) => {
+    const now = Date.now();
+    if (proactiveRunningRef.current) return false;
+    if (isLoadingRef.current) return false;               // AI 正在回复，不插嘴
+    if (now - lastProactiveAtRef.current < PROACTIVE_MIN_GAP) return false;
+    if (typeof document !== 'undefined' && document.hidden) return false;
+    const input = document.querySelector<HTMLTextAreaElement>('.chat-input');
+    if (input && input.value.trim()) return false;        // 用户正在打字，不打扰
+    if (!opts?.skipChance && Math.random() > PROACTIVE_CHANCE) return false;
+    lastProactiveAtRef.current = now;
+    lastActivityAtRef.current = now;
+    triggerProactive(reason);
+    return true;
+  }, [triggerProactive]);
+
+  // 记忆旧事扫描：在长期记忆里找"今天该跟进"的线索（面试/考试/出成绩等日期相关事件）
+  const findMemoryFollowup = useCallback((charId: string): string | null => {
+    const mem = memoryByCharRef.current[charId];
+    if (!mem) return null;
+    const todayStr = new Date().toISOString().slice(0, 10);
+    let followed: Record<string, string> = {};
+    try { followed = JSON.parse(localStorage.getItem(KEY_MEM_FOLLOWED) || '{}'); } catch { followed = {}; }
+    const candidates = [...(mem.keyFacts || []), ...(mem.userGoals || [])];
+    const weekWords = ['周一', '周二', '周三', '周四', '周五', '周六', '周日', '周内', '周末'];
+    for (const text of candidates) {
+      const lower = text.toLowerCase();
+      const hitDate =
+        (text.includes('今天') || text.includes(todayStr) || text.includes(todayStr.slice(5))) ||
+        text.includes('明天') || text.includes('后天') ||
+        weekWords.some((w) => text.includes(w));
+      const hitEvent = /面试|考试|出成绩|答辩|比赛|体检|报名|截止|约了|复诊|回家|开学|报到|入职/.test(text);
+      if (hitEvent && (hitDate || /\d{1,2}\s*月\s*\d{0,2}/.test(text))) {
+        const key = `${todayStr}:${text.slice(0, 12)}`;
+        if (followed[key]) continue;  // 今天已跟进过，不重复
+        followed[key] = new Date().toISOString();
+        try {
+          const cleaned = Object.fromEntries(Object.entries(followed).filter(([k]) => k.startsWith(todayStr) || k.startsWith(new Date(Date.now() - 86400000).toISOString().slice(0, 10))));
+          localStorage.setItem(KEY_MEM_FOLLOWED, JSON.stringify(cleaned));
+        } catch {}
+        return text.slice(0, 40);
+      }
+    }
+    return null;
+  }, []);
+
+  // 摄像头只负责"看见"：更新状态胶囊，绝不在背后替用户决定何时表达
+  const handleFaceMood = useCallback((label: string | null) => {
+    faceMoodRef.current = label;
+    faceMoodAtRef.current = label ? Date.now() : 0;
+    setFaceMoodState(label);
+  }, []);
+
+  // 用户主动把"此刻心情"递给 TA：用户点了按钮，这就是用户在说话
+  // 与正常发消息一样进入对话（带"主动"标识、走弹窗通知），但不受概率/冷却限制
+  const handleShareMood = useCallback((label: string): boolean => {
+    if (proactiveRunningRef.current || isLoadingRef.current) return false;
+    if (typeof document !== 'undefined' && document.hidden) return false;
+    triggerProactive(`mood:${label}`);
+    return true;
+  }, [triggerProactive]);
+
+  // 供回调读取最新状态（避免闭包旧值）
+  const activeIdRef = useRef(activeId);
+  activeIdRef.current = activeId;
+  const messagesByCharRef = useRef(messagesByChar);
+  messagesByCharRef.current = messagesByChar;
+  const memoryByCharRef = useRef(memoryByChar);
+  memoryByCharRef.current = memoryByChar;
 
   // initialization
   useEffect(() => {
@@ -105,6 +263,12 @@ export default function ChatClient({ initialCharacterId, initialSettings }: Chat
 
     const savedActive = localStorage.getItem(KEY_ACTIVE);
     if (savedActive) setActiveId(savedActive);
+
+    // 外观主题
+    try {
+      const t = JSON.parse(localStorage.getItem(KEY_THEME) || 'null');
+      if (t && typeof t.bg === 'string' && typeof t.bubble === 'string') setTheme(t);
+    } catch {}
   }, []);
 
   // persist
@@ -116,6 +280,7 @@ export default function ChatClient({ initialCharacterId, initialSettings }: Chat
 
   useEffect(() => { localStorage.setItem(KEY_CUSTOM_CHARS, JSON.stringify(customChars)); }, [customChars]);
   useEffect(() => { localStorage.setItem(KEY_AVATARS, JSON.stringify(avatarOverrides)); }, [avatarOverrides]);
+  useEffect(() => { try { localStorage.setItem(KEY_THEME, JSON.stringify(theme)); } catch {} }, [theme]);
 
   // get display character
   const getDisplayChar = useCallback(
@@ -136,6 +301,95 @@ export default function ChatClient({ initialCharacterId, initialSettings }: Chat
     },
     [activeId]
   );
+
+  // getDisplayChar 的 ref 版（供主动关怀等异步回调读取最新值）
+  const getDisplayCharRef = useRef(getDisplayChar);
+  getDisplayCharRef.current = getDisplayChar;
+
+  /* ============ 主动对话·由头监听系统 ============
+     真人从不准点发消息——每个主动开口都必须有"由头"：
+     发呆 / 切页回来 / 久别回归 / 深夜 / 记忆里的旧事 / 摄像头看到情绪。
+     由头出现后过随机概率闸门 + 最小间隔，内容仍由 AI 结合人设与记忆现生成。 */
+  useEffect(() => {
+    const markOpen = () => { try { localStorage.setItem(KEY_LAST_OPEN, String(Date.now())); } catch {} };
+
+    // 用户在页面上的任何活动都刷新"发呆计时"
+    const bump = () => { lastActivityAtRef.current = Date.now(); };
+    const activityEvents = ['pointermove', 'keydown', 'click', 'touchstart', 'wheel'];
+    activityEvents.forEach((ev) => window.addEventListener(ev, bump, { passive: true }));
+
+    // 切页 / 切回
+    const onVisibility = () => {
+      if (document.hidden) {
+        lastHiddenAtRef.current = Date.now();
+        markOpen();
+        return;
+      }
+      const awayMs = Date.now() - (lastHiddenAtRef.current || Date.now());
+      const awayMin = Math.max(1, Math.round(awayMs / 60000));
+      lastActivityAtRef.current = Date.now();
+      // 回来后等 7 秒：用户如果马上开始打字，闸门会自动拦住
+      setTimeout(() => {
+        const hour = new Date().getHours();
+        const isLateNight = hour >= 0 && hour < 5;
+        if (awayMs > RETURNING_MS) {
+          attemptProactive(`returning:${awayMin}`);
+        } else if (isLateNight && awayMin >= 15) {
+          attemptProactive('late_night');
+        } else if (awayMin >= 20 && awayMin <= 180) {
+          attemptProactive(`tab_back:${awayMin}`);
+        } else {
+          const hit = findMemoryFollowup(activeIdRef.current);
+          if (hit) attemptProactive(`memory:${hit}`);
+        }
+      }, 7000);
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('pagehide', markOpen);
+
+    // 每分钟巡检：发呆 10 分钟 / 深夜还在 / 记忆旧事
+    const timer = setInterval(() => {
+      if (document.hidden) return;
+      const now = Date.now();
+      const hour = new Date().getHours();
+      const idleMin = (now - lastActivityAtRef.current) / 60000;
+      if (idleMin >= 10) {
+        attemptProactive('idle');
+      } else if (hour >= 0 && hour < 5 && idleMin >= 5) {
+        attemptProactive('late_night');
+      } else if (idleMin >= 3) {
+        const hit = findMemoryFollowup(activeIdRef.current);
+        if (hit) attemptProactive(`memory:${hit}`);
+      }
+    }, 60000);
+
+    // 打开页面时：隔了很久回来（>20 小时），8 秒后自然地打个招呼
+    let mountTimer: ReturnType<typeof setTimeout> | null = null;
+    try {
+      const last = Number(localStorage.getItem(KEY_LAST_OPEN) || 0);
+      const awayMin = last ? Math.round((Date.now() - last) / 60000) : 0;
+      if (awayMin > RETURNING_MS / 60000) {
+        mountTimer = setTimeout(() => attemptProactive(`returning:${awayMin}`), 8000);
+      }
+      markOpen();
+    } catch {}
+
+    return () => {
+      activityEvents.forEach((ev) => window.removeEventListener(ev, bump));
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pagehide', markOpen);
+      clearInterval(timer);
+      if (mountTimer) clearTimeout(mountTimer);
+      markOpen();
+    };
+  }, [attemptProactive, findMemoryFollowup]);
+
+  // 主动消息弹窗 12 秒后自动收起（消息已在对话列表里，不丢）
+  useEffect(() => {
+    if (!proactivePopup) return;
+    const t = setTimeout(() => setProactivePopup(null), PROACTIVE_POPUP_MS);
+    return () => clearTimeout(t);
+  }, [proactivePopup]);
 
   // invite code upgrade
   const handleUpgrade = useCallback(async (code: string) => {
@@ -195,6 +449,10 @@ export default function ChatClient({ initialCharacterId, initialSettings }: Chat
       const updatedMessages = [...currentMessages, userMsg];
       setMessagesByChar((prev) => ({ ...prev, [activeId]: updatedMessages }));
 
+      // 用户主动说话了，重置主动开口冷却与发呆计时（正在聊天时不主动插话）
+      lastProactiveAtRef.current = Date.now();
+      lastActivityAtRef.current = Date.now();
+
       const today = new Date().toISOString().split('T')[0];
       const updatedMem = { ...currentMemory };
       updatedMem.totalChatTime += 1;
@@ -221,6 +479,7 @@ export default function ChatClient({ initialCharacterId, initialSettings }: Chat
               description: display.description,
               style: display.isPreset ? 'gentle' : 'custom',
               memory: updatedMem,
+              // 心情只在用户主动点"告诉 TA"时传递，打字对话不自动附带情绪
             },
           }),
         });
@@ -323,10 +582,33 @@ export default function ChatClient({ initialCharacterId, initialSettings }: Chat
         onSend={handleSend}
         isLoading={isLoading}
         memory={activeMemory}
+        faceMood={faceMoodState}
+        theme={theme}
+        voice={displayChar.voice && displayChar.voice.length ? displayChar.voice : ['x6_lingxiaoxuan_pro']}
         onNewChat={() => handleNewChat(activeId)}
         onSidebarToggle={() => setSidebarCollapsed((prev) => !prev)}
         onOpenSettings={() => setModalMode({ type: 'edit', charId: activeId })}
+        onOpenAppearance={() => setShowAppearance(true)}
       />
+      <EmotionCamera onMood={handleFaceMood} onShareMood={handleShareMood} />
+      {proactivePopup && (
+        <ProactivePopup
+          character={getDisplayChar(proactivePopup.charId)}
+          content={proactivePopup.content}
+          onOpen={() => {
+            setActiveId(proactivePopup.charId as CharacterId);
+            setProactivePopup(null);
+            setTimeout(() => {
+              const el = document.querySelector('.chat-messages');
+              el?.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+            }, 100);
+          }}
+          onClose={() => setProactivePopup(null)}
+        />
+      )}
+      {showAppearance && (
+        <AppearancePanel theme={theme} onChange={setTheme} onClose={() => setShowAppearance(false)} />
+      )}
       {modalMode && (
         <SettingsModal
           mode={modalMode.type}

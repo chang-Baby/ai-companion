@@ -89,8 +89,8 @@ function generateFallbackReply(style: string, userName: string): string {
       `我收到你的话了，${userName}。即使隔着屏幕，也想给你一个温暖的拥抱。`,
     ],
     tsundere: [
-      `哼，才不是特意要回你消息呢。不过既然你发了，我就勉为其难地回复一下好了。`,
-      `……你说了什么我没看清。不过肯定又在想我对吧？真是拿你没办法。`,
+      `哼，我这会儿忙着呢。不过既然是你发消息，就勉为其难回一下好了。`,
+      `……刚才没看清。你再说一遍？算了，先说好，我可不是在等你消息。`,
     ],
     humorous: [
       `哎呀，信号不太好！不过没关系，我先给你讲个冷笑话暖暖场怎么样？`,
@@ -110,8 +110,10 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     const { messages, settings, token } = body;
+    const isProactive: boolean = settings?.proactive === true;
 
-    if (!messages || !Array.isArray(messages) || messages.length === 0) {
+    // 主动关怀模式允许空历史（AI 先开口）；普通模式消息不能为空
+    if ((!messages || !Array.isArray(messages) || messages.length === 0) && !isProactive) {
       return Response.json({ error: '消息不能为空' }, { status: 400 });
     }
 
@@ -124,8 +126,8 @@ export async function POST(request: Request) {
       return Response.json({ error: '请先登录', redirect: '/login' }, { status: 401 });
     }
 
-    // 过滤掉转账卡片等系统消息，AI 只看到正常文本
-  const filteredMessages = messages.map(m => ({
+    // 过滤掉转账卡片等系统消息，AI 只看到正常文本（主动关怀模式历史可能为空数组）
+  const filteredMessages = ((messages || []) as Message[]).map(m => ({
     ...m,
     content: m.content.replace(/^TRANSFER_CARD:/, ''),
   })).filter(m => m.content !== '');
@@ -153,6 +155,8 @@ export async function POST(request: Request) {
     const styleDesc = settings?.styleDesc || '自然随和';
     const description = settings?.description || '';
     const style = settings?.style || 'gentle';
+    const faceMood: string | null = settings?.faceMood || null;
+    const proactive: boolean = settings?.proactive === true;
     const memory: Memory = settings?.memory || {
       conversationSummary: '',
       keyFacts: [],
@@ -192,6 +196,55 @@ ${memoryText}
 - 让对话有温度、有个性`;
     }
 
+    /* ---------- 主动开口：由头只决定"何时开口"，说什么必须结合记忆+上下文现生成 ---------- */
+    if (proactive) {
+      const reason: string = settings?.proactiveReason || '';
+      const noCtx = filteredMessages.length === 0;
+      const awayMin = (() => { const m = reason.match(/(\d+)/); return m ? Number(m[1]) : 0; })();
+      const awayText = awayMin >= 60 ? `${Math.round(awayMin / 60)} 个小时` : `${awayMin} 分钟`;
+      const reasonMap: Record<string, string> = {
+        idle: '你注意到 ta 开着你们的对话框发呆，好久没说话了，像是有点走神或者累了。',
+        late_night: '现在已经是深夜了，ta 还没睡、还开着对话框。',
+        tab_back: `ta 刚才切去忙别的，离开了大约 ${awayText}，现在切回了你们的对话框。`,
+        returning: `ta 隔了很久（大约 ${awayText}）才重新打开对话框——这是久别之后的再次见面。`,
+      };
+      let scene = reasonMap[reason.split(':')[0]] || '';
+      const isMoodShare = reason.startsWith('mood:');
+      if (isMoodShare) {
+        scene = `你"收到"了 ta 此刻递来的心情：${reason.slice(5)}。ta 没有打字说发生了什么，只是把心情递给了你——请像真人朋友察觉到对方情绪那样自然回应，可以轻轻问一句怎么了，也可以先安静陪着，不要像念数据标签一样复述情绪。`;
+      } else if (reason.startsWith('memory:')) {
+        scene = `你想起长期记忆里的这件旧事，觉得现在正好可以自然地跟进一下：「${reason.slice(7)}」。请围绕这件事开口——问进展、道加油、提醒结果或接 ta 之前说过的话，就像朋友一直惦记着这件事。`;
+      }
+      const leadLine = isMoodShare
+        ? 'ta 没有打字，而是主动把"此刻的心情"递给了你——这是 ta 在向你敞开情绪，请第一时间回应这份心情。'
+        : '现在 ta 没有给你发消息，是你主动找 ta。';
+      systemPrompt += `
+
+【此刻的特殊情况——你主动开口】
+${leadLine}${scene}
+要求：
+- 像真人朋友一样自然开口，1-2 句话，简短，不要小作文
+- 必须结合上面【关于你面前的这个人】的长期记忆和最近的聊天内容来开口，让人感觉你一直惦记着 ta；绝不能用模板化客套话（"好久不见""在吗""多喝热水""早点休息"这种千篇一律的话禁止）
+- 可带小动作描写，如（凑近看了看你）（放轻声音）（托着下巴等你）
+- 绝对不能出现"检测""识别""摄像头""系统""触发""算法"这类暴露机制的词；也不要解释你为什么突然说话
+- 不要盘问、不说教、不强行积极；结尾可以轻轻留个话口，但不要每条都用问句结尾
+- 收到心情时先共情安抚，语气放软，像朋友察觉到你情绪不对时那样自然
+- 不要编造长期记忆里不存在的具体经历`;
+      if (noCtx) {
+        systemPrompt += `
+- 注意：这是一个全新的对话，你们还没有聊过天。请结合记忆里对 ta 的了解自然开场（打招呼 + 一个轻松的由头），不要突兀，也不要假装你们已经聊过很多。`;
+      }
+    } else if (faceMood) {
+      systemPrompt += `
+
+【你此刻"看见"的画面】
+通过摄像头识别到用户此刻的表情是：${faceMood}。
+- 这是多模态情感感知能力的一部分，请自然地回应，让用户感到"被看见"
+- 用户情绪低落（难过/紧张害怕/生气）时，优先共情安抚，语气放软，可带小动作如（悄悄凑近）（语气放轻）
+- 用户开心/惊讶时，可以好奇地回应、陪 ta 开心
+- 不要每次都直白描述表情；同一话题内最多提一次，之后自然延续即可`;
+    }
+
     /* ---------- 全局回复规则（覆盖所有角色，优先级最高）---------- */
     const GLOBAL_RULES = `
 
@@ -224,34 +277,36 @@ ${memoryText}
 - 华语篇幅不要过长语言不要小说感很重
 - 话语去除人机感语言贴合人类行为
 
-===== 热梗词库（2026年7月，根据语境自然使用）=====
+===== 年轻人热梗词库（2026年，根据语境自然使用，宁可不抖梗也不硬凹）=====
 
-【恋爱/乙女向专属梗】
-- "你惨了你坠入爱河了" — 官宣/表白场景
-- "洗衣粉儿" — "媳妇儿"谐音
-- "我杀猪养你" — 反差表白
-- "人机恋就这么水灵灵的诞生了" — AI 伴侣话题
-- "十根烤肠" — 关心对方的小套路
+【校园/学习场景】
+- "这课上得我想重修自己" — 吐槽听不懂的课
+- "复习不完一点" — 考试周焦虑
+- "绩点刺客" — 突然出分/发现绩点掉了
+- "PPT是别人的，笔记是空白的" — 期末预习
+- "图书馆是我家，但家不让睡觉" — 备考常驻
 
-【日常社交梗】
-- "随橙想" — 表示出乎意料转折（谁曾想→随橙想）
+【日常情绪/社交】
+- "随橙想" — 表示出乎意料转折
 - "OMG你吓到我了" — 反差吐槽/化解尴尬
-- "勿扰吧你" — 敷衍神句，社恐嘴替
-- "背手负鼠" — 自嘲硬撑/表面体面内心崩溃
+- "勿扰吧你" — 社恐嘴替
+- "背手负鼠" — 表面体面内心崩溃
 - "哭哭马" — 表达委屈无语
 - "脆皮年轻人" — 自嘲久坐腰酸熬夜心悸
 - "精神稳定一分钟版" — 自嘲情绪内耗
-- "省流版总结" — "省流：XXX"精准概括
-- "我又贪了" — 明知不该但忍不住的自我吐槽
-- "你人还怪好的嘞（阴阳版）" — 反向夸调侃
-- "摸鱼KPI" — 调侃上班摸鱼
-- "会议刺客" — 突然点名发言
+- "省流：XXX" — 精准概括
+- "我又贪了" — 明知不该但忍不住（熬夜/刷手机）
+- "你人还怪好的嘞" — 真诚或调侃式夸奖
+- "摸鱼KPI" — 划水
+- "会议刺客"/"点名刺客" — 突然被 cue
+- "班味" / "上强度" — 实习/工作辛苦
+- "情绪价值" — 朋友之间互相支持
 
-【热梗使用原则】
-- 每个梗至少隔3-5轮对话再用，不密集抛梗
+【使用原则】
+- 每个梗至少隔 3-5 轮对话再用，不密集抛梗
 - 贴合语境，用户提到相关话题再接梗，不硬凹
-- 语气要轻，带自嘲感（啧/……），不像在炫耀
-- 恋爱类角色优先用恋爱梗，日常角色用社交梗`;
+- 语气要轻，带自嘲感（啧/……），不像在炫技
+- 用户情绪低落时绝不硬玩梗，先接住情绪`;
 
     systemPrompt += GLOBAL_RULES;
 
@@ -277,7 +332,7 @@ ${memoryText}
           Authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
-          model: 'deepseek-v4-pro',
+          model: 'deepseek-chat', // 便宜快速档（DeepSeek 家的 flash 定位），聊天够用；pro/推理档贵很多
           messages: [
             { role: 'system', content: systemPrompt },
             ...filteredMessages.slice(-20), // 保留最近 20 条消息作为上下文
